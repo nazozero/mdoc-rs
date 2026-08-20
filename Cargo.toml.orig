@@ -1,0 +1,90 @@
+[package]
+name = "mdoc-rs"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.75"
+description = "ISO/IEC 18013-5 mobile document (mdoc) library — parsing, verification, selective disclosure, and issuance"
+license = "BSD-2-Clause"
+repository = "https://github.com/kushaldas/mdoc-rs"
+homepage = "https://github.com/kushaldas/mdoc-rs"
+keywords = ["mdoc", "mdl", "iso18013", "eudiw", "cbor"]
+categories = ["cryptography", "authentication"]
+exclude = ["examples/"]
+
+[features]
+default = ["tsp", "issue", "blocking"]
+
+# tsp-ltv integration for IACA certificate chain validation
+tsp = ["dep:tsp-ltv", "tsp-ltv?/tsp"]
+
+# Document building and signing (not just verification)
+issue = []
+
+# Device engagement (QR, NFC, BLE) + session encryption
+engagement = ["dep:aes-gcm"]
+
+# Credential revocation status checking
+status = ["dep:reqwest", "dep:tokio"]
+
+# Synchronous API wrappers
+blocking = ["dep:tokio"]
+
+# CBOR diagnostic-notation pretty printing (interop debugging / triage)
+debug = []
+
+# Enables the PKCS#11 (HSM) issuance example (examples/pkcs11_issuer.rs).
+# Off by default so the core crate and CI never pull the cryptoki C bindings.
+pkcs11-example = ["dep:cryptoki", "issue"]
+
+[dependencies]
+# CBOR + COSE
+ciborium = "0.2"
+coset = "0.3"
+
+# Crypto
+sha2 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
+digest = "0.10"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+p384 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+ed25519-dalek = { version = "2", features = ["pem"] }
+ecdsa = { version = "0.16", features = ["signing", "verifying", "der"] }
+signature = "2"
+rand = "0.8"
+
+# X.509 / DER
+x509-cert = { version = "0.2", features = ["pem"] }
+der = { version = "0.7", features = ["alloc"] }
+const-oid = { version = "0.9", features = ["db"] }
+
+# Shared infrastructure (feature-gated)
+tsp-ltv = { version = "0.2", default-features = false, optional = true }
+
+# Session encryption (feature-gated)
+aes-gcm = { version = "0.10", optional = true }
+
+# HTTP for status checking (feature-gated)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"], optional = true }
+tokio = { version = "1", features = ["rt", "macros"], optional = true }
+
+# Utils
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+base64 = "0.22"
+log = "0.4"
+p521 = { version = "0.13", features = ["ecdsa"] }
+
+# HSM / PKCS#11 issuance example (feature-gated; see `pkcs11-example`)
+cryptoki = { version = "0.12", optional = true }
+
+[dev-dependencies]
+hex = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# The PKCS#11 example needs the `pkcs11-example` feature (and thus cryptoki).
+[[example]]
+name = "pkcs11_issuer"
+required-features = ["pkcs11-example"]
