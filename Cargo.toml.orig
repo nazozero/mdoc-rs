@@ -2,7 +2,7 @@
 name = "mdoc-rs"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.81"
 description = "ISO/IEC 18013-5 mobile document (mdoc) library — parsing, verification, selective disclosure, and issuance"
 license = "BSD-2-Clause"
 repository = "https://github.com/kushaldas/mdoc-rs"
@@ -39,7 +39,7 @@ pkcs11-example = ["dep:cryptoki", "issue"]
 [dependencies]
 # CBOR + COSE
 ciborium = "0.2"
-coset = "0.3"
+coset = "0.4.2"
 
 # Crypto
 sha2 = "0.10"

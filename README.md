@@ -52,7 +52,7 @@ mdoc-rs = "0.2"
 mdoc-rs = { version = "0.2", default-features = false, features = ["tsp"] }
 ```
 
-MSRV: **Rust 1.75**. License: **BSD-2-Clause**.
+MSRV: **Rust 1.81**. License: **BSD-2-Clause**.
 
 ---
 

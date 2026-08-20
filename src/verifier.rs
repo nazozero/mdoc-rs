@@ -785,6 +785,11 @@ impl Verifier {
     /// Verify the issuer's COSE_Sign1 signature using the public key from the x5chain certificate.
     fn verify_issuer_signature(&self, doc: &IssuerSignedDocument) -> VerificationAssessment {
         let result = (|| -> Result<bool, MdocError> {
+            crate::cose::validate_critical_headers(
+                &doc.issuer_signed.issuer_auth.cose_sign1.protected,
+                &doc.issuer_signed.issuer_auth.cose_sign1.unprotected,
+            )?;
+
             // Extract issuer certificate
             let cert_der = doc.issuer_signed.issuer_auth.certificate_der()?;
 
