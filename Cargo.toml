@@ -11,7 +11,7 @@
 
 [package]
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.81"
 name = "mdoc-rs"
 version = "0.2.0"
 build = false
@@ -100,7 +100,7 @@ version = "0.9"
 features = ["db"]
 
 [dependencies.coset]
-version = "0.3"
+version = "0.4.2"
 
 [dependencies.cryptoki]
 version = "0.12"

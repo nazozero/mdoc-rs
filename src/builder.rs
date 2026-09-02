@@ -347,24 +347,15 @@ fn build_mso_cbor(
     let validity_map = ciborium::Value::Map(vec![
         (
             ciborium::Value::Text("signed".to_string()),
-            ciborium::Value::Tag(
-                0,
-                Box::new(ciborium::Value::Text(validity.signed.to_rfc3339())),
-            ),
+            tdate(&validity.signed),
         ),
         (
             ciborium::Value::Text("validFrom".to_string()),
-            ciborium::Value::Tag(
-                0,
-                Box::new(ciborium::Value::Text(validity.valid_from.to_rfc3339())),
-            ),
+            tdate(&validity.valid_from),
         ),
         (
             ciborium::Value::Text("validUntil".to_string()),
-            ciborium::Value::Tag(
-                0,
-                Box::new(ciborium::Value::Text(validity.valid_until.to_rfc3339())),
-            ),
+            tdate(&validity.valid_until),
         ),
     ]);
 
@@ -417,9 +408,33 @@ fn build_mso_cbor(
     Ok(ciborium::Value::Map(mso_entries))
 }
 
+fn tdate(value: &chrono::DateTime<chrono::Utc>) -> ciborium::Value {
+    ciborium::Value::Tag(
+        0,
+        Box::new(ciborium::Value::Text(value.to_rfc3339_opts(
+            chrono::SecondsFormat::Secs,
+            true,
+        ))),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tdate_uses_second_precision_and_utc_z() {
+        let value = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00.123+00:00")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            tdate(&value),
+            ciborium::Value::Tag(
+                0,
+                Box::new(ciborium::Value::Text("2026-09-01T00:00:00Z".into()))
+            )
+        );
+    }
 
     #[test]
     fn well_known_dates_get_default_tags() {
