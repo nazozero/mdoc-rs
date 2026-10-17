@@ -1,11 +1,13 @@
 //! Session transcript construction (ISO 18013-5 §9.1.5).
 
+use std::borrow::Cow;
+
 use crate::cbor::data_item;
 use crate::error::MdocError;
 
 /// Session transcript for device authentication binding.
 #[derive(Clone, Debug)]
-pub enum SessionTranscript {
+pub enum SessionTranscript<'a> {
     /// ISO 18013-5 proximity mode (NFC/BLE).
     Proximity {
         device_engagement: Vec<u8>,
@@ -25,12 +27,12 @@ pub enum SessionTranscript {
         e_reader_key: Vec<u8>,
     },
     /// Pre-encoded transcript bytes.
-    Raw(Vec<u8>),
+    Raw(Cow<'a, [u8]>),
 }
 
-impl SessionTranscript {
+impl SessionTranscript<'_> {
     /// Encode the session transcript to CBOR bytes.
-    pub fn to_cbor_bytes(&self) -> Result<Vec<u8>, MdocError> {
+    pub fn to_cbor_bytes(&self) -> Result<Cow<'_, [u8]>, MdocError> {
         let value = match self {
             Self::Proximity {
                 device_engagement,
@@ -68,11 +70,11 @@ impl SessionTranscript {
                 data_item::wrap_tag24(reader_engagement),
             ]),
             Self::Raw(bytes) => {
-                return Ok(bytes.clone());
+                return Ok(Cow::Borrowed(bytes));
             }
         };
 
-        data_item::encode_cbor(&value)
+        data_item::encode_cbor(&value).map(Cow::Owned)
     }
 }
 

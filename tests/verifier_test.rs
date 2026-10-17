@@ -310,7 +310,7 @@ fn attach_device_signature(
     });
 }
 
-fn proximity_transcript() -> SessionTranscript {
+fn proximity_transcript() -> SessionTranscript<'static> {
     SessionTranscript::Raw({
         let mut buf = Vec::new();
         ciborium::into_writer(
@@ -318,7 +318,7 @@ fn proximity_transcript() -> SessionTranscript {
             &mut buf,
         )
         .unwrap();
-        buf
+        buf.into()
     })
 }
 

@@ -10,9 +10,9 @@ use crate::model::types::DeviceAuth;
 use crate::session::{self, SessionTranscript};
 
 /// Builder for creating device response presentations with selective disclosure.
-pub struct DeviceResponseBuilder {
+pub struct DeviceResponseBuilder<'a> {
     documents: Vec<IssuerSignedDocument>,
-    session_transcript: Option<SessionTranscript>,
+    session_transcript: Option<SessionTranscript<'a>>,
     device_name_spaces: HashMap<String, HashMap<String, ciborium::Value>>,
     auth_method: Option<DeviceAuthMethod>,
 }
@@ -28,7 +28,7 @@ enum DeviceAuthMethod {
     },
 }
 
-impl DeviceResponseBuilder {
+impl<'a> DeviceResponseBuilder<'a> {
     /// Create a builder from existing issuer-signed documents.
     pub fn from_documents(documents: Vec<IssuerSignedDocument>) -> Self {
         Self {
@@ -40,7 +40,7 @@ impl DeviceResponseBuilder {
     }
 
     /// Set the session transcript.
-    pub fn session_transcript(mut self, transcript: SessionTranscript) -> Self {
+    pub fn session_transcript(mut self, transcript: SessionTranscript<'a>) -> Self {
         self.session_transcript = Some(transcript);
         self
     }

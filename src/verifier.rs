@@ -106,9 +106,9 @@ pub type OnCheckFn = Box<dyn Fn(&VerificationAssessment)>;
 
 /// Options for verification.
 #[derive(Default)]
-pub struct VerifyOptions {
+pub struct VerifyOptions<'a> {
     /// Session transcript for device authentication.
-    pub session_transcript: Option<SessionTranscript>,
+    pub session_transcript: Option<SessionTranscript<'a>>,
     /// Ephemeral reader key for MAC verification.
     pub ephemeral_reader_key: Option<Vec<u8>>,
     /// Disable certificate chain validation.

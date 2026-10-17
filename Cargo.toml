@@ -74,6 +74,10 @@ name = "roundtrip_test"
 path = "tests/roundtrip_test.rs"
 
 [[test]]
+name = "session_test"
+path = "tests/session_test.rs"
+
+[[test]]
 name = "verifier_test"
 path = "tests/verifier_test.rs"
 
