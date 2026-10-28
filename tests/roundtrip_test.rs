@@ -17,9 +17,8 @@ struct TestSigner {
 impl TestSigner {
     fn new() -> Self {
         use p256::ecdsa::SigningKey;
-        use rand::rngs::OsRng;
 
-        let signing_key = SigningKey::random(&mut OsRng);
+        let signing_key = SigningKey::from_slice(&[1u8; 32]).unwrap();
 
         // Use the public key SEC1 bytes as a dummy "certificate" for the test.
         // Real usage would have a proper X.509 certificate.

@@ -247,11 +247,10 @@ fn tampered_attribute_digest_is_rejected() {
 
 /// Generate a device key pair and return (signing key, COSE_Key public).
 fn device_keypair() -> (p256::ecdsa::SigningKey, coset::CoseKey) {
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
-    use rand::rngs::OsRng;
-    let sk = p256::ecdsa::SigningKey::random(&mut OsRng);
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    let sk = p256::ecdsa::SigningKey::from_slice(&[1u8; 32]).unwrap();
     let pk = p256::PublicKey::from(sk.verifying_key());
-    let point = pk.to_encoded_point(false);
+    let point = pk.to_sec1_point(false);
     let cose_key = coset::CoseKeyBuilder::new_ec2_pub_key(
         iana::EllipticCurve::P_256,
         point.x().unwrap().to_vec(),
