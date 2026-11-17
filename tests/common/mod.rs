@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use chrono::{DateTime, Duration, Utc};
 use nazo_mdoc::{
     builder::DocumentBuilder,
     model::*,
     session::{RedirectHandover, SessionTranscript},
+    time::Timestamp,
 };
 use signature::Signer;
 
@@ -17,16 +17,33 @@ pub const EVIL_CERT_HEX: &str = "308201963082013da00302010202146653c832e4a02afe1
 pub const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 pub const NS: &str = "org.iso.18013.5.1";
 
-pub fn now() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-11-17T12:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
+pub fn now() -> Timestamp {
+    Timestamp::parse_rfc3339("2026-11-17T12:00:00Z").unwrap()
+}
+
+// Test-fixture arithmetic is deliberately limited to regular Unix instants.
+// Leap-second cases use explicit RFC 3339 literals and must not be projected
+// onto an adjacent regular second by this helper.
+pub fn offset_seconds(value: Timestamp, seconds: i64) -> Timestamp {
+    Timestamp::from_unix_nanos(
+        value.unix_nanos().expect("regular test-fixture instant")
+            + i128::from(seconds) * 1_000_000_000,
+    )
+    .unwrap()
+}
+
+pub fn offset_milliseconds(value: Timestamp, milliseconds: i64) -> Timestamp {
+    Timestamp::from_unix_nanos(
+        value.unix_nanos().expect("regular test-fixture instant")
+            + i128::from(milliseconds) * 1_000_000,
+    )
+    .unwrap()
 }
 pub fn validity() -> ValidityInfo {
     ValidityInfo {
         signed: now(),
         valid_from: now(),
-        valid_until: now() + Duration::days(30),
+        valid_until: offset_seconds(now(), 30 * 24 * 60 * 60),
         expected_update: None,
     }
 }

@@ -114,6 +114,10 @@ entropy integration when issuance is built for `wasm32-unknown-unknown` (the hos
 must provide the corresponding JS environment). Verification requires an explicit
 time, and has no network or clock service dependency.
 
+Validity and verification time use `Timestamp`, backed by the maintained `time`
+crate. It preserves UTC leap-second ordering and refuses a lossy Unix-time
+projection of a leap second. The production core does not depend on Chrono.
+
 ```sh
 cargo fmt --check
 cargo check --no-default-features

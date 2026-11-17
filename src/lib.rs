@@ -27,9 +27,11 @@ pub mod parser;
 #[cfg(feature = "issue")]
 pub mod response_builder;
 pub mod session;
+pub mod time;
 pub mod verifier;
 
 pub use error::MdocError;
 pub use model::{MDoc, MDocStatus};
 pub use parser::{parse, parse_hex};
+pub use time::Timestamp;
 pub use verifier::{PendingTrustDocument, VerificationOptions, verify_presentation};

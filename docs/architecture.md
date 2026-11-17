@@ -36,7 +36,10 @@ The issuer builder receives attributes, a device public key, validity, and an
 explicit status choice. It validates a supported *public* device point, rejects
 private key parameters, generates distinct salts and digest IDs, and builds the
 MSO. Subsecond clock input is ordered before and after normalization to whole UTC
-seconds. Certificate signing-time comparisons retain Chrono's leap-second ordering.
+seconds. `time::Timestamp` delegates calendar parsing/formatting to the maintained
+`time` crate and retains a separate leap-second marker. Comparisons distinguish
+the last regular second, the leap second and the next minute; Unix conversion
+returns `None` for leap seconds instead of silently clamping them.
 
 `prepare` returns exact immutable signing bytes. The host uses its existing
 asynchronous key lease. `finish` verifies the returned signature before attaching

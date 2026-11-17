@@ -153,16 +153,12 @@ impl DocumentBuilder {
                     .into(),
             ));
         }
-        use chrono::Timelike;
-        let whole_seconds = |time: chrono::DateTime<chrono::Utc>| {
-            // Preserve Chrono's representation of a whole leap second.
-            time.with_nanosecond(time.nanosecond() / 1_000_000_000 * 1_000_000_000)
-                .expect("normalizing an existing timestamp preserves its range")
-        };
-        validity.signed = whole_seconds(validity.signed);
-        validity.valid_from = whole_seconds(validity.valid_from);
-        validity.valid_until = whole_seconds(validity.valid_until);
-        validity.expected_update = validity.expected_update.map(whole_seconds);
+        validity.signed = validity.signed.truncate_to_second();
+        validity.valid_from = validity.valid_from.truncate_to_second();
+        validity.valid_until = validity.valid_until.truncate_to_second();
+        validity.expected_update = validity
+            .expected_update
+            .map(crate::time::Timestamp::truncate_to_second);
         validity.validate()?;
 
         let mut name_spaces: HashMap<String, Vec<IssuerSignedItem>> = HashMap::new();
@@ -337,21 +333,21 @@ fn build_mso_cbor(
     let mut validity_entries = vec![
         (
             ciborium::Value::Text("signed".to_string()),
-            tdate(&validity.signed),
+            tdate(&validity.signed)?,
         ),
         (
             ciborium::Value::Text("validFrom".to_string()),
-            tdate(&validity.valid_from),
+            tdate(&validity.valid_from)?,
         ),
         (
             ciborium::Value::Text("validUntil".to_string()),
-            tdate(&validity.valid_until),
+            tdate(&validity.valid_until)?,
         ),
     ];
     if let Some(update) = validity.expected_update {
         validity_entries.push((
             ciborium::Value::Text("expectedUpdate".into()),
-            tdate(&update),
+            tdate(&update)?,
         ));
     }
     let validity_map = ciborium::Value::Map(validity_entries);
@@ -421,13 +417,11 @@ fn fresh_item_randomness(
     ))
 }
 
-fn tdate(value: &chrono::DateTime<chrono::Utc>) -> ciborium::Value {
-    ciborium::Value::Tag(
+fn tdate(value: &crate::time::Timestamp) -> Result<ciborium::Value, MdocError> {
+    Ok(ciborium::Value::Tag(
         0,
-        Box::new(ciborium::Value::Text(
-            value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        )),
-    )
+        Box::new(ciborium::Value::Text(value.format_rfc3339()?)),
+    ))
 }
 
 #[cfg(test)]
@@ -436,11 +430,11 @@ mod tests {
 
     #[test]
     fn tdate_uses_second_precision_and_utc_z() {
-        let value = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00.123+00:00")
+        let value = crate::time::Timestamp::parse_rfc3339("2026-09-01T00:00:00.123+00:00")
             .unwrap()
-            .with_timezone(&chrono::Utc);
+            .truncate_to_second();
         assert_eq!(
-            tdate(&value),
+            tdate(&value).unwrap(),
             ciborium::Value::Tag(
                 0,
                 Box::new(ciborium::Value::Text("2026-09-01T00:00:00Z".into()))

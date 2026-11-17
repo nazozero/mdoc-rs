@@ -2,6 +2,10 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|input: &[u8]| {
+    if let Ok(text) = std::str::from_utf8(input) {
+        let _ = nazo_mdoc::Timestamp::parse_rfc3339(text);
+        let _ = nazo_mdoc::cbor::date::FullDate::new(text);
+    }
     let _ = nazo_mdoc::cbor::raw::validate(input);
     let _ = nazo_mdoc::session::SessionTranscript::from_cbor(input);
     if let Ok(response) = nazo_mdoc::parse(input) {

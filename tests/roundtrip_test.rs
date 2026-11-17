@@ -29,7 +29,7 @@ fn issuer_and_holder_roundtrip_has_pending_trust_not_a_final_valid_flag() {
 #[test]
 fn expected_update_is_signed_and_preserved() {
     let mut dates = validity();
-    dates.expected_update = Some(now() + chrono::Duration::days(1));
+    dates.expected_update = Some(offset_seconds(now(), 24 * 60 * 60));
     let document = issue(builder().validity(dates.clone()));
     assert_eq!(
         document
@@ -46,7 +46,7 @@ fn expected_update_is_signed_and_preserved() {
 #[test]
 fn invalid_validity_order_cannot_be_issued() {
     let mut dates = validity();
-    dates.valid_from -= chrono::Duration::hours(1);
+    dates.valid_from = offset_seconds(dates.valid_from, -60 * 60);
     assert!(
         builder()
             .validity(dates)
@@ -113,9 +113,9 @@ fn state_reference_is_covered_by_issuer_signature() {
 #[test]
 fn subsecond_clock_input_is_normalized_only_after_order_validation() {
     let mut dates = validity();
-    dates.signed += chrono::Duration::milliseconds(100);
-    dates.valid_from += chrono::Duration::milliseconds(200);
-    dates.valid_until += chrono::Duration::milliseconds(300);
+    dates.signed = offset_milliseconds(dates.signed, 100);
+    dates.valid_from = offset_milliseconds(dates.valid_from, 200);
+    dates.valid_until = offset_milliseconds(dates.valid_until, 300);
     let result = issue(builder().validity(dates));
     let actual = result
         .issuer_signed
@@ -131,10 +131,10 @@ fn subsecond_clock_input_is_normalized_only_after_order_validation() {
 #[test]
 fn normalization_cannot_hide_reversed_order_or_create_an_empty_interval() {
     let mut reversed = validity();
-    reversed.signed += chrono::Duration::milliseconds(900);
-    reversed.valid_from += chrono::Duration::milliseconds(100);
+    reversed.signed = offset_milliseconds(reversed.signed, 900);
+    reversed.valid_from = offset_milliseconds(reversed.valid_from, 100);
     let mut empty = validity();
-    empty.valid_until = empty.valid_from + chrono::Duration::milliseconds(500);
+    empty.valid_until = offset_milliseconds(empty.valid_from, 500);
     for dates in [reversed, empty] {
         assert!(
             builder()

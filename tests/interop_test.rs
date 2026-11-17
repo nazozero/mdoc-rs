@@ -10,8 +10,8 @@ fn annex_d_original_bytes_digests_and_issuer_signature() {
     let mso = auth.mso().unwrap();
     assert_eq!(mso.doc_type, "org.iso.18013.5.1.mDL");
     assert_eq!(
-        mso.validity_info.valid_until.to_rfc3339(),
-        "2021-10-01T13:30:02+00:00"
+        mso.validity_info.valid_until.format_rfc3339().unwrap(),
+        "2021-10-01T13:30:02Z"
     );
     assert!(
         document.issuer_signed.name_spaces["org.iso.18013.5.1"]

@@ -245,7 +245,7 @@ fn issuer_validity_is_checked_at_explicit_time() {
             &bytes,
             &transcript(),
             &nazo_mdoc::VerificationOptions {
-                now: now() + chrono::Duration::days(31),
+                now: offset_seconds(now(), 31 * 24 * 60 * 60),
                 max_documents: 1
             }
         ),

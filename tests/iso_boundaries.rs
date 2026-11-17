@@ -3,11 +3,10 @@
 
 mod common;
 
-use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use ciborium::Value;
 use common::*;
 use der::{Decode, Encode};
-use nazo_mdoc::{MdocError, model::*, verifier::verify_issued};
+use nazo_mdoc::{MdocError, model::*, time::Timestamp, verifier::verify_issued};
 use sha2::{Digest, Sha256};
 use signature::{Signer, Verifier};
 
@@ -69,17 +68,15 @@ fn authenticate_mso(document: &mut IssuerSignedDocument, change: impl FnOnce(&mu
     assert_issuer_signature(document);
 }
 
-fn parse_time(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value)
-        .unwrap()
-        .with_timezone(&Utc)
+fn parse_time(value: &str) -> Timestamp {
+    Timestamp::parse_rfc3339(value).unwrap()
 }
 
 fn set_dates(
     document: &mut IssuerSignedDocument,
-    signed: DateTime<Utc>,
-    from: DateTime<Utc>,
-    until: DateTime<Utc>,
+    signed: Timestamp,
+    from: Timestamp,
+    until: Timestamp,
 ) {
     authenticate_mso(document, |mso| {
         let dates = field_mut(mso, "validityInfo");
@@ -88,15 +85,13 @@ fn set_dates(
             ("validFrom", from),
             ("validUntil", until),
         ] {
-            *field_mut(dates, name) = Value::Tag(
-                0,
-                Box::new(Value::Text(date.to_rfc3339_opts(SecondsFormat::Secs, true))),
-            );
+            *field_mut(dates, name) =
+                Value::Tag(0, Box::new(Value::Text(date.format_rfc3339().unwrap())));
         }
     });
 }
 
-fn expect_validity_rejection(document: &IssuerSignedDocument, at: DateTime<Utc>, reason: &str) {
+fn expect_validity_rejection(document: &IssuerSignedDocument, at: Timestamp, reason: &str) {
     let result = verify_issued(&document.to_issuer_signed_cbor().unwrap(), DOC_TYPE, at);
     assert!(
         matches!(result, Err(MdocError::Validity(ref message)) if message.contains(reason)),
@@ -108,19 +103,25 @@ fn expect_validity_rejection(document: &IssuerSignedDocument, at: DateTime<Utc>,
 fn authenticated_mso_signed_time_is_contained_by_inclusive_leaf_certificate_bounds() {
     let leaf = x509_cert::Certificate::from_der(&hex::decode(GENUINE_CERT_HEX).unwrap()).unwrap();
     let convert = |value: x509_cert::time::Time| {
-        DateTime::from_timestamp(value.to_unix_duration().as_secs() as i64, 0).unwrap()
+        Timestamp::from_unix_seconds(value.to_unix_duration().as_secs().try_into().unwrap())
+            .unwrap()
     };
     let before = convert(leaf.tbs_certificate.validity.not_before);
     let after = convert(leaf.tbs_certificate.validity.not_after);
     for (signed, accepted) in [
-        (before - Duration::seconds(1), false),
+        (offset_seconds(before, -1), false),
         (before, true),
         (after, true),
-        (after + Duration::seconds(1), false),
+        (offset_seconds(after, 1), false),
     ] {
         let mut document = issue(builder());
-        set_dates(&mut document, signed, signed, signed + Duration::days(1));
-        let at = signed + Duration::seconds(1);
+        set_dates(
+            &mut document,
+            signed,
+            signed,
+            offset_seconds(signed, 24 * 60 * 60),
+        );
+        let at = offset_seconds(signed, 1);
         if accepted {
             let pending =
                 verify_issued(&document.to_issuer_signed_cbor().unwrap(), DOC_TYPE, at).unwrap();
@@ -133,17 +134,17 @@ fn authenticated_mso_signed_time_is_contained_by_inclusive_leaf_certificate_boun
 
 fn replace_public_fixture_certificate_dates(
     document: &mut IssuerSignedDocument,
-    not_before: DateTime<Utc>,
-    not_after: DateTime<Utc>,
+    not_before: Timestamp,
+    not_after: Timestamp,
 ) {
     // A fresh, genuinely self-signed public test certificate keeps certificate
     // corruption from being the explanation. It still is not a trust anchor.
     let mut leaf =
         x509_cert::Certificate::from_der(&hex::decode(GENUINE_CERT_HEX).unwrap()).unwrap();
-    let to_time = |value: DateTime<Utc>| {
+    let to_time = |value: Timestamp| {
         x509_cert::time::Time::UtcTime(
             der::asn1::UtcTime::from_unix_duration(std::time::Duration::from_secs(
-                value.timestamp().try_into().unwrap(),
+                value.unix_seconds().unwrap().try_into().unwrap(),
             ))
             .unwrap(),
         )
@@ -175,7 +176,11 @@ fn whole_leap_second_is_not_truncated_to_the_certificate_last_regular_second() {
     let regular = parse_time("2016-12-31T23:59:59Z");
     let leap = parse_time("2016-12-31T23:59:60Z");
     let next = parse_time("2017-01-01T00:00:00Z");
-    assert_eq!(leap.timestamp(), regular.timestamp());
+    assert!(leap.is_leap_second());
+    assert!(leap.is_whole_second());
+    assert_eq!(leap.unix_seconds(), None);
+    assert_eq!(leap.unix_nanos(), None);
+    assert_eq!(leap.format_rfc3339().unwrap(), "2016-12-31T23:59:60Z");
     assert!(regular < leap && leap < next);
     for (end, accepted) in [(regular, false), (next, true)] {
         let mut document = issue(builder());
@@ -184,7 +189,12 @@ fn whole_leap_second_is_not_truncated_to_the_certificate_last_regular_second() {
             parse_time("2016-01-01T00:00:00Z"),
             end,
         );
-        set_dates(&mut document, leap, next, next + Duration::days(1));
+        set_dates(
+            &mut document,
+            leap,
+            next,
+            offset_seconds(next, 24 * 60 * 60),
+        );
         assert_eq!(
             document
                 .issuer_signed
@@ -216,8 +226,8 @@ fn current_validity_includes_both_endpoints_and_rejects_adjacent_times() {
         assert_eq!(pending.mso().validity_info.valid_until, dates.valid_until);
     }
     for at in [
-        dates.valid_from - Duration::seconds(1),
-        dates.valid_until + Duration::seconds(1),
+        offset_seconds(dates.valid_from, -1),
+        offset_seconds(dates.valid_until, 1),
     ] {
         expect_validity_rejection(&document, at, "not valid at verification time");
     }

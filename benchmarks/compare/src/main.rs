@@ -120,40 +120,30 @@ fn attributes() -> Vec<(&'static str, ciborium::Value)> {
 
 fn baseline_builder(
     key: &coset::CoseKey,
-    now: chrono::DateTime<Utc>,
+    validity: &baseline::model::ValidityInfo,
 ) -> baseline::builder::DocumentBuilder {
     baseline::builder::DocumentBuilder::new(fixtures::DOC_TYPE)
         .add_namespace(fixtures::NS, attributes())
         .device_key(key.clone())
-        .validity(baseline::model::ValidityInfo {
-            signed: now,
-            valid_from: now,
-            valid_until: now + Duration::days(30),
-            expected_update: None,
-        })
+        .validity(validity.clone())
 }
 
 fn candidate_builder(
     key: &coset::CoseKey,
-    now: chrono::DateTime<Utc>,
+    validity: &candidate::model::ValidityInfo,
 ) -> candidate::builder::DocumentBuilder {
     candidate::builder::DocumentBuilder::new(fixtures::DOC_TYPE)
         .add_namespace(fixtures::NS, attributes())
         .device_key(key.clone())
-        .validity(candidate::model::ValidityInfo {
-            signed: now,
-            valid_from: now,
-            valid_until: now + Duration::days(30),
-            expected_update: None,
-        })
+        .validity(validity.clone())
 }
 
 fn issue_candidate(
     key: &coset::CoseKey,
     signer: &ExternalSigner,
-    now: chrono::DateTime<Utc>,
+    validity: &candidate::model::ValidityInfo,
 ) -> candidate::model::IssuerSignedDocument {
-    let prepared = candidate_builder(key, now)
+    let prepared = candidate_builder(key, validity)
         .prepare(
             candidate::model::CoseAlgorithm::ES256,
             vec![signer.certificate.clone()],
@@ -255,7 +245,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         certificate: hex::decode(fixtures::GENUINE_CERT_HEX)?,
     };
     let issuance_time = fixtures::now();
-    let candidate_issued = issue_candidate(&device_key, &signer, issuance_time);
+    // Construct both concrete validity representations outside measurement.
+    // The old API requires Chrono; the maintained candidate deliberately does
+    // not. Neither timed path parses, converts or adds fixture timestamps.
+    let baseline_time = chrono::DateTime::from_timestamp(
+        issuance_time.unix_seconds().expect("ordinary fixture time"),
+        0,
+    )
+    .expect("baseline fixture time");
+    let baseline_until = baseline_time + Duration::days(30);
+    let baseline_validity = baseline::model::ValidityInfo {
+        signed: baseline_time,
+        valid_from: baseline_time,
+        valid_until: baseline_until,
+        expected_update: None,
+    };
+    let candidate_validity = candidate::model::ValidityInfo {
+        signed: issuance_time,
+        valid_from: issuance_time,
+        valid_until: candidate::Timestamp::from_unix_seconds(baseline_until.timestamp())?,
+        expected_update: None,
+    };
+    assert_eq!(
+        candidate_validity.signed.format_rfc3339()?,
+        baseline_validity
+            .signed
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    );
+    assert_eq!(
+        candidate_validity.valid_until.format_rfc3339()?,
+        baseline_validity
+            .valid_until
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    );
+    let candidate_issued = issue_candidate(&device_key, &signer, &candidate_validity);
     let response = fixtures::present(candidate_issued, &transcript).to_device_response_cbor()?;
     let verify_options = candidate::VerificationOptions {
         now: fixtures::now(),
@@ -484,13 +507,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "candidate_adds_validation_and_signature_confirmation",
         || {
             black_box(
-                baseline_builder(&device_key, issuance_time)
+                baseline_builder(&device_key, &baseline_validity)
                     .sign(&signer)
                     .expect("baseline issuance"),
             );
         },
         || {
-            black_box(issue_candidate(&device_key, &signer, issuance_time));
+            black_box(issue_candidate(&device_key, &signer, &candidate_validity));
         },
     );
     runner.candidate_only(

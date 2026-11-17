@@ -16,6 +16,18 @@ pub struct FullDate(String);
 impl FullDate {
     /// Create a new FullDate from a string.
     pub fn new(date: &str) -> Result<Self, MdocError> {
+        use ::time::format_description::{BorrowedFormatItem, Component, modifier};
+        let format = [
+            BorrowedFormatItem::Component(Component::CalendarYearFullStandardRange(
+                modifier::CalendarYearFullStandardRange::default(),
+            )),
+            BorrowedFormatItem::StringLiteral("-"),
+            BorrowedFormatItem::Component(Component::MonthNumerical(
+                modifier::MonthNumerical::default(),
+            )),
+            BorrowedFormatItem::StringLiteral("-"),
+            BorrowedFormatItem::Component(Component::Day(modifier::Day::default())),
+        ];
         if date.len() != 10
             || date.as_bytes()[4] != b'-'
             || date.as_bytes()[7] != b'-'
@@ -24,7 +36,7 @@ impl FullDate {
                 .iter()
                 .enumerate()
                 .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
-            || chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err()
+            || ::time::Date::parse(date, &format[..]).is_err()
         {
             return Err(MdocError::Cbor("invalid full-date".into()));
         }

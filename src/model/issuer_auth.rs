@@ -327,19 +327,17 @@ fn parse_validity_info(value: &Value) -> Result<ValidityInfo, MdocError> {
     Ok(validity)
 }
 
-fn parse_datetime(value: &Value) -> Result<chrono::DateTime<chrono::Utc>, MdocError> {
+fn parse_datetime(value: &Value) -> Result<crate::time::Timestamp, MdocError> {
     let Value::Tag(0, inner) = value else {
         return Err(mso_error("MSO timestamps require tdate (Tag 0)"));
     };
     let text = as_text(inner, "tdate content")?;
-    if text.len() != 20 || !text.ends_with('Z') {
+    if text.len() != 20 || !text.ends_with('Z') || text.as_bytes()[10] != b'T' {
         return Err(mso_error(
             "MSO timestamps require whole UTC seconds with Z offset",
         ));
     }
-    chrono::DateTime::parse_from_rfc3339(text)
-        .map(|value| value.with_timezone(&chrono::Utc))
-        .map_err(|_| mso_error("invalid MSO timestamp"))
+    crate::time::Timestamp::parse_rfc3339(text).map_err(|_| mso_error("invalid MSO timestamp"))
 }
 
 fn parse_device_key_info(value: &Value) -> Result<DeviceKeyInfo, MdocError> {

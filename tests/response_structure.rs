@@ -8,7 +8,7 @@
 use ciborium::Value;
 use nazo_mdoc::{
     MdocError, VerificationOptions, cbor::raw::Limits, parser, session::SessionTranscript,
-    verify_presentation,
+    time::Timestamp, verify_presentation,
 };
 
 fn fixture() -> Value {
@@ -59,7 +59,7 @@ fn assert_rejected_by_presentation_envelope(bytes: &[u8]) {
         bytes,
         &transcript,
         &VerificationOptions {
-            now: chrono::DateTime::from_timestamp(1_609_459_200, 0).unwrap(),
+            now: Timestamp::from_unix_seconds(1_609_459_200).unwrap(),
             max_documents: 16,
         },
     )
@@ -251,7 +251,7 @@ fn missing_device_signed_cannot_be_a_verified_presentation() {
             &bytes,
             &transcript,
             &VerificationOptions {
-                now: chrono::DateTime::from_timestamp(1_609_459_200, 0).unwrap(),
+                now: Timestamp::from_unix_seconds(1_609_459_200).unwrap(),
                 max_documents: 1,
             },
         ),

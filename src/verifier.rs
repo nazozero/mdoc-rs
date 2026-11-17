@@ -5,15 +5,15 @@
 //! revocation, credential status and request authorization remain with the host.
 //! There is no `is_valid` flag or switch that can mark a skipped check as passed.
 
+use crate::time::Timestamp;
 use crate::{MdocError, cbor::raw::Limits, model::*, session::SessionTranscript};
-use chrono::{DateTime, Utc};
 use der::Decode;
 use std::collections::HashMap;
 
 /// Verification time and the presentation profile's document count limit.
 #[derive(Clone, Debug)]
 pub struct VerificationOptions {
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
     /// HAIP callers set this to 1. Generic bounded ISO responses can allow more.
     pub max_documents: usize,
 }
@@ -132,7 +132,7 @@ impl PendingIssuerTrustDocument {
 pub fn verify_issued(
     encoded: &[u8],
     expected_doc_type: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PendingIssuerTrustDocument, MdocError> {
     let document = IssuerSignedDocument {
         doc_type: expected_doc_type.to_owned(),
@@ -149,7 +149,7 @@ pub fn verify_issued(
     })
 }
 
-type CertificateInterval = (DateTime<Utc>, DateTime<Utc>);
+type CertificateInterval = (Timestamp, Timestamp);
 type IssuerEvidence = (Mso, Vec<Vec<u8>>, CertificateInterval);
 
 pub(crate) fn certificate_interval(
@@ -159,8 +159,8 @@ pub(crate) fn certificate_interval(
     let convert = |time: x509_cert::time::Time| {
         let seconds = i64::try_from(time.to_unix_duration().as_secs())
             .map_err(|_| MdocError::Certificate("certificate time out of range".into()))?;
-        DateTime::from_timestamp(seconds, 0)
-            .ok_or_else(|| MdocError::Certificate("certificate time out of range".into()))
+        Timestamp::from_unix_seconds(seconds)
+            .map_err(|_| MdocError::Certificate("certificate time out of range".into()))
     };
     Ok((convert(validity.not_before)?, convert(validity.not_after)?))
 }
@@ -196,7 +196,7 @@ fn authenticate_issuer(document: &IssuerSignedDocument) -> Result<IssuerEvidence
 fn validate_claims(
     document: &IssuerSignedDocument,
     mso: &Mso,
-    now: DateTime<Utc>,
+    now: Timestamp,
     certificate_interval: CertificateInterval,
 ) -> Result<(), MdocError> {
     if mso.doc_type != document.doc_type {

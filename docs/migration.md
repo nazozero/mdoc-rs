@@ -34,6 +34,7 @@ branch must resolve both dependencies together rather than choose one lockfile.
 | Repeated MSO decoding by verifier and host | Authenticate/decode once; consume the returned immutable MSO |
 | Automatic schema inference from attribute names | Explicit namespace/schema mapping in the caller; core preserves typed values |
 | Implicit optional TSP/HTTP/PKCS11/engagement dependencies | Removed from the protocol core |
+| Chrono `DateTime<Utc>` in validity and verifier options | Core `Timestamp`; explicit, fallible Unix conversion and leap-second-preserving RFC3339 |
 
 The raw encoded fields are authoritative. Editing a public decoded
 `element_value` does not edit its signed wire bytes. To issue a different claim,
@@ -46,6 +47,16 @@ before and after conversion to whole seconds; malformed wire timestamps,
 epoch tags, fractional seconds and non-Z offsets are rejected. Signed time must
 fall inside the leaf certificate validity interval. Current credential validity
 is checked against the explicit verification time.
+
+The core no longer depends on the unmaintained Chrono crate
+([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543.html)).
+`Timestamp::from_unix_nanos`/`from_unix_seconds` construct ordinary instants;
+`parse_rfc3339` preserves leap seconds and `format_rfc3339` renders UTC.
+`unix_seconds`/`unix_nanos` return `None` for leap seconds. An application still
+using another date library must preserve this distinction at its boundary; it
+must not map a leap second to the preceding ordinary second for a trust decision.
+`truncate_to_second` removes subsecond precision while preserving the leap marker.
+This type is an mdoc UTC instant, not a general time-zone or duration library.
 
 ## Security checks transferred to the host
 

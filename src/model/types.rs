@@ -1,6 +1,6 @@
 //! Core types: MSO, ValidityInfo, DeviceKeyInfo, DeviceAuth, DigestAlgorithm.
 
-use chrono::{DateTime, Datelike, Utc};
+use crate::time::Timestamp;
 use coset::{CoseKey, CoseMac0, CoseSign1};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -101,13 +101,13 @@ pub struct StatusListInfo {
 #[derive(Clone, Debug)]
 pub struct ValidityInfo {
     /// When the MSO was signed.
-    pub signed: DateTime<Utc>,
+    pub signed: Timestamp,
     /// When the MSO becomes valid.
-    pub valid_from: DateTime<Utc>,
+    pub valid_from: Timestamp,
     /// When the MSO expires.
-    pub valid_until: DateTime<Utc>,
+    pub valid_until: Timestamp,
     /// Expected next update (optional).
-    pub expected_update: Option<DateTime<Utc>>,
+    pub expected_update: Option<Timestamp>,
 }
 
 impl ValidityInfo {
@@ -123,10 +123,9 @@ impl ValidityInfo {
         .into_iter()
         .flatten()
         {
-            // Chrono represents a whole leap second using 1_000_000_000 ns.
-            if timestamp.timestamp_subsec_nanos() % 1_000_000_000 != 0
-                || !(0..=9999).contains(&timestamp.year())
-            {
+            // Timestamp already guarantees a supported four-digit UTC year
+            // and retains whole leap seconds separately from ordinary instants.
+            if !timestamp.is_whole_second() {
                 return Err(crate::MdocError::Validity(
                     "MSO timestamps require whole UTC seconds and four-digit years".into(),
                 ));
