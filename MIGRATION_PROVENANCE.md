@@ -38,3 +38,15 @@ source branch was published:
 that advisory has no patched `rsa` release. This record does not waive or hide
 the advisory. Consumer acceptance requires exact-commit resolution and full
 NazoAuth validation on the Hostinger build environment.
+
+## Maintained protocol core
+
+`nazo-mdoc 0.3.0` continues from the exact production revision
+`9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc`. The bounded wire decoder, pending-trust
+verification pipeline and external-signature preparation replace the former
+lenient Value parser, assessment aggregator and private-key response builder.
+MSO/status and COSE primitives retain and strengthen inherited behavior; original
+licenses, authorship records and independent fixture provenance remain intact.
+The package rename is accompanied by this architectural change and a separate
+NazoAuth migration. It is not a claim of a clean-room implementation or inherited
+certification. See `docs/migration.md` and `docs/protocol-matrix.md`.

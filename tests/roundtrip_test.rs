@@ -1,230 +1,216 @@
-//! Round-trip test: issue → verify selective disclosure on an mdoc document.
+//! Issuance/presentation interoperability using independent external signers.
 #![cfg(feature = "issue")]
-
-use chrono::{Duration, Utc};
-use mdoc_rs::builder::{CoseSigner, DocumentBuilder};
-use mdoc_rs::disclosure;
-use mdoc_rs::error::MdocError;
-use mdoc_rs::model::types::{DigestAlgorithm, ValidityInfo};
-
-/// Test P-256 signer that uses a dummy certificate.
-struct TestSigner {
-    signing_key: p256::ecdsa::SigningKey,
-    /// A minimal dummy DER certificate (not valid X.509, just enough bytes for testing).
-    cert_der: Vec<u8>,
-}
-
-impl TestSigner {
-    fn new() -> Self {
-        use p256::ecdsa::SigningKey;
-
-        let signing_key = SigningKey::from_slice(&[1u8; 32]).unwrap();
-
-        // Use the public key SEC1 bytes as a dummy "certificate" for the test.
-        // Real usage would have a proper X.509 certificate.
-        let verifying_key = signing_key.verifying_key();
-        let pub_bytes = p256::PublicKey::from(verifying_key)
-            .to_sec1_bytes()
-            .to_vec();
-
-        Self {
-            signing_key,
-            cert_der: pub_bytes,
-        }
-    }
-}
-
-impl CoseSigner for TestSigner {
-    fn sign(&self, tbs: &[u8]) -> Result<Vec<u8>, MdocError> {
-        use signature::Signer;
-        let sig: p256::ecdsa::Signature = self
-            .signing_key
-            .try_sign(tbs)
-            .map_err(|e| MdocError::Signature(e.to_string()))?;
-        // Return raw r||s for COSE (64 bytes for P-256)
-        Ok(sig.to_bytes().to_vec())
-    }
-
-    fn algorithm(&self) -> i64 {
-        -7 // ES256
-    }
-
-    fn certificate_der(&self) -> &[u8] {
-        &self.cert_der
-    }
-}
+mod common;
+use common::*;
+use nazo_mdoc::{MdocError, model::*};
 
 #[test]
 fn issue_and_verify_disclosure() {
-    let signer = TestSigner::new();
+    let document = issue(builder());
+    let bytes = document.to_issuer_signed_cbor().unwrap();
+    let pending = nazo_mdoc::verifier::verify_issued(&bytes, DOC_TYPE, now()).unwrap();
+    assert_eq!(pending.mso().doc_type, DOC_TYPE);
+    assert_eq!(pending.document().issuer_signed.name_spaces[NS].len(), 2);
+    assert_eq!(
+        pending.certificates()[0],
+        hex::decode(GENUINE_CERT_HEX).unwrap()
+    );
+}
 
-    let now = Utc::now();
-    let validity = ValidityInfo {
-        signed: now,
-        valid_from: now,
-        valid_until: now + Duration::days(365),
-        expected_update: None,
-    };
+#[test]
+fn issuer_and_holder_roundtrip_has_pending_trust_not_a_final_valid_flag() {
+    let document = present(issue(builder()), &transcript());
+    let result = verify(&document.to_device_response_cbor().unwrap()).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].mso().doc_type, DOC_TYPE);
+    assert!(result[0].mso().status.is_none());
+}
 
-    // Build a minimal mDL document
-    let doc = DocumentBuilder::new("org.iso.18013.5.1.mDL")
-        .add_namespace(
-            "org.iso.18013.5.1",
-            vec![
-                (
-                    "family_name",
-                    ciborium::Value::Text("Lindqvist".to_string()),
-                ),
-                ("given_name", ciborium::Value::Text("Anna".to_string())),
-                (
-                    "birth_date",
-                    ciborium::Value::Tag(
-                        1004,
-                        Box::new(ciborium::Value::Text("1990-01-15".to_string())),
-                    ),
-                ),
-                ("issuing_country", ciborium::Value::Text("SE".to_string())),
-            ],
+#[test]
+fn expected_update_is_signed_and_preserved() {
+    let mut dates = validity();
+    dates.expected_update = Some(now() + chrono::Duration::days(1));
+    let document = issue(builder().validity(dates.clone()));
+    assert_eq!(
+        document
+            .issuer_signed
+            .issuer_auth
+            .mso()
+            .unwrap()
+            .validity_info
+            .expected_update,
+        dates.expected_update
+    );
+}
+
+#[test]
+fn invalid_validity_order_cannot_be_issued() {
+    let mut dates = validity();
+    dates.valid_from -= chrono::Duration::hours(1);
+    assert!(
+        builder()
+            .validity(dates)
+            .prepare(
+                CoseAlgorithm::ES256,
+                vec![hex::decode(GENUINE_CERT_HEX).unwrap()]
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn signer_with_wrong_key_cannot_complete() {
+    use signature::Signer;
+    let prepared = builder()
+        .prepare(
+            CoseAlgorithm::ES256,
+            vec![hex::decode(GENUINE_CERT_HEX).unwrap()],
         )
-        .validity(validity)
-        .digest_algorithm(DigestAlgorithm::Sha256)
-        .sign(&signer)
-        .expect("document signing should succeed");
+        .unwrap();
+    let signature: p256::ecdsa::Signature = holder_key().sign(prepared.signing_input());
+    assert!(matches!(
+        prepared.finish(signature.to_bytes().to_vec()),
+        Err(MdocError::Signature(_))
+    ));
+}
 
-    // Verify the document type
-    assert_eq!(doc.doc_type, "org.iso.18013.5.1.mDL");
+#[test]
+fn duplicate_attributes_cannot_be_issued() {
+    assert!(
+        builder()
+            .add_namespace(NS, vec![("family_name", "duplicate".into())])
+            .prepare(
+                CoseAlgorithm::ES256,
+                vec![hex::decode(GENUINE_CERT_HEX).unwrap()]
+            )
+            .is_err()
+    );
+}
 
-    // Verify the MSO is parseable
-    let mso = doc
+#[test]
+fn state_reference_is_covered_by_issuer_signature() {
+    let document = issue(builder().status_list(42, "https://issuer.example/status/1"));
+    let pending = nazo_mdoc::verifier::verify_issued(
+        &document.to_issuer_signed_cbor().unwrap(),
+        DOC_TYPE,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(
+        pending
+            .mso()
+            .status
+            .as_ref()
+            .unwrap()
+            .status_list
+            .as_ref()
+            .unwrap()
+            .idx,
+        42
+    );
+}
+
+#[test]
+fn subsecond_clock_input_is_normalized_only_after_order_validation() {
+    let mut dates = validity();
+    dates.signed += chrono::Duration::milliseconds(100);
+    dates.valid_from += chrono::Duration::milliseconds(200);
+    dates.valid_until += chrono::Duration::milliseconds(300);
+    let result = issue(builder().validity(dates));
+    let actual = result
         .issuer_signed
         .issuer_auth
         .mso()
-        .expect("MSO should parse");
-    assert_eq!(mso.version, "1.0");
-    assert_eq!(mso.digest_algorithm, DigestAlgorithm::Sha256);
-    assert_eq!(mso.doc_type, "org.iso.18013.5.1.mDL");
+        .unwrap()
+        .validity_info;
+    assert_eq!(actual.signed, validity().signed);
+    assert_eq!(actual.valid_from, validity().valid_from);
+    assert_eq!(actual.valid_until, validity().valid_until);
+}
 
-    // Verify valueDigests has the right namespace
-    assert!(mso.value_digests.contains_key("org.iso.18013.5.1"));
-    let ns_digests = &mso.value_digests["org.iso.18013.5.1"];
-    assert_eq!(ns_digests.len(), 4, "four digest entries");
-
-    // Verify selective disclosure — all digests should match
-    let results = disclosure::verify_disclosure(&doc.issuer_signed.name_spaces, &mso)
-        .expect("disclosure verification should succeed");
-
-    assert_eq!(results.len(), 1, "one namespace");
-    let ns_result = &results[0];
-    assert_eq!(ns_result.namespace, "org.iso.18013.5.1");
-    assert!(ns_result.is_valid, "all digests should match");
-    assert_eq!(ns_result.attributes.len(), 4, "four attributes");
-
-    for attr in &ns_result.attributes {
+#[test]
+fn normalization_cannot_hide_reversed_order_or_create_an_empty_interval() {
+    let mut reversed = validity();
+    reversed.signed += chrono::Duration::milliseconds(900);
+    reversed.valid_from += chrono::Duration::milliseconds(100);
+    let mut empty = validity();
+    empty.valid_until = empty.valid_from + chrono::Duration::milliseconds(500);
+    for dates in [reversed, empty] {
         assert!(
-            attr.digest_matches,
-            "digest for '{}' should match (reason: {:?})",
-            attr.element_identifier, attr.reason
+            builder()
+                .validity(dates)
+                .prepare(
+                    CoseAlgorithm::ES256,
+                    vec![hex::decode(GENUINE_CERT_HEX).unwrap()]
+                )
+                .is_err()
         );
     }
-
-    // Verify we can extract the "certificate" from x5chain
-    let cert_der = doc
-        .issuer_signed
-        .issuer_auth
-        .certificate_der()
-        .expect("certificate should be extractable");
-    assert!(!cert_der.is_empty());
-
-    // Verify the COSE_Sign1 signature field is non-empty
-    assert!(!doc
-        .issuer_signed
-        .issuer_auth
-        .cose_sign1
-        .signature
-        .is_empty());
 }
 
 #[test]
-fn issue_pid_document() {
-    let signer = TestSigner::new();
-
-    let now = Utc::now();
-    let validity = ValidityInfo {
-        signed: now,
-        valid_from: now,
-        valid_until: now + Duration::days(30),
-        expected_update: None,
-    };
-
-    let doc = DocumentBuilder::new("eu.europa.ec.eudiw.pid.1")
-        .add_namespace(
-            "eu.europa.ec.eudiw.pid.1",
-            vec![
-                ("family_name", ciborium::Value::Text("Svensson".to_string())),
-                ("given_name", ciborium::Value::Text("Erik".to_string())),
-                ("age_over_18", ciborium::Value::Bool(true)),
-            ],
-        )
-        .validity(validity)
-        .sign(&signer)
-        .expect("PID document signing should succeed");
-
-    assert_eq!(doc.doc_type, "eu.europa.ec.eudiw.pid.1");
-
-    // Check attribute values are preserved
-    let ns = doc
-        .issuer_signed
-        .name_spaces
-        .get("eu.europa.ec.eudiw.pid.1")
-        .expect("namespace should exist");
-    assert_eq!(ns.len(), 3);
-
-    let family = ns
-        .iter()
-        .find(|i| i.element_identifier == "family_name")
-        .unwrap();
-    assert_eq!(family.element_value.as_text().unwrap(), "Svensson");
-
-    let age = ns
-        .iter()
-        .find(|i| i.element_identifier == "age_over_18")
-        .unwrap();
-    assert!(age.element_value.as_bool().unwrap());
-
-    // Verify disclosure
-    let mso = doc.issuer_signed.issuer_auth.mso().unwrap();
-    let results = disclosure::verify_disclosure(&doc.issuer_signed.name_spaces, &mso).unwrap();
-    assert!(results[0].is_valid);
+fn device_key_must_be_public_complete_and_on_a_supported_curve() {
+    let public = device_key();
+    let mut secret = public.clone();
+    secret
+        .params
+        .push((coset::Label::Int(-4), ciborium::Value::Bytes(vec![42; 32])));
+    let mut missing = public.clone();
+    missing
+        .params
+        .retain(|(label, _)| *label != coset::Label::Int(-3));
+    let mut off_curve = public.clone();
+    for (label, value) in &mut off_curve.params {
+        if matches!(label, coset::Label::Int(-2 | -3)) {
+            *value = ciborium::Value::Bytes(vec![0; 32]);
+        }
+    }
+    for invalid in [secret, missing, off_curve] {
+        assert!(
+            builder()
+                .device_key(invalid)
+                .prepare(
+                    CoseAlgorithm::ES256,
+                    vec![hex::decode(GENUINE_CERT_HEX).unwrap()]
+                )
+                .is_err()
+        );
+    }
 }
 
 #[test]
-fn mso_validity_dates_parsed() {
-    let signer = TestSigner::new();
+fn generic_issuer_preserves_explicit_tags_and_does_not_infer_custom_schema() {
+    let explicit = nazo_mdoc::cbor::date::FullDate::new("2000-02-29")
+        .unwrap()
+        .to_cbor();
+    let doc = issue(builder().add_namespace(
+        "org.example.custom",
+        vec![
+            ("birth_date", "custom-value".into()),
+            ("calendar_date", explicit.clone()),
+        ],
+    ));
+    let parsed =
+        nazo_mdoc::verifier::verify_issued(&doc.to_issuer_signed_cbor().unwrap(), DOC_TYPE, now())
+            .unwrap();
+    let items = &parsed.document().issuer_signed.name_spaces["org.example.custom"];
+    assert_eq!(
+        items[0].element_value,
+        ciborium::Value::Text("custom-value".into())
+    );
+    assert_eq!(items[1].element_value, explicit);
+}
 
-    let now = Utc::now();
-    let valid_from = now - Duration::hours(1);
-    let valid_until = now + Duration::days(90);
-
-    let validity = ValidityInfo {
-        signed: now,
-        valid_from,
-        valid_until,
-        expected_update: None,
-    };
-
-    let doc = DocumentBuilder::new("org.iso.18013.5.1.mDL")
-        .add_namespace(
-            "org.iso.18013.5.1",
-            vec![("family_name", ciborium::Value::Text("Test".to_string()))],
-        )
-        .validity(validity)
-        .sign(&signer)
-        .expect("signing should succeed");
-
-    let mso = doc.issuer_signed.issuer_auth.mso().unwrap();
-
-    // Validity dates should be parsed (not just Utc::now() placeholders)
-    assert!(mso.validity_info.valid_from < Utc::now());
-    assert!(mso.validity_info.valid_until > Utc::now());
-    assert!(mso.validity_info.signed <= Utc::now());
+#[test]
+fn ambiguous_element_value_is_rejected_before_external_signing() {
+    let duplicate = ciborium::Value::Map(vec![("x".into(), 1.into()), ("x".into(), 2.into())]);
+    assert!(
+        builder()
+            .add_namespace("org.example", vec![("ambiguous", duplicate)])
+            .prepare(
+                CoseAlgorithm::ES256,
+                vec![hex::decode(GENUINE_CERT_HEX).unwrap()]
+            )
+            .is_err()
+    );
 }

@@ -11,12 +11,24 @@ pub const TAG_FULL_DATE: u64 = 1004;
 
 /// A full-date value (RFC 8943, CBOR Tag 1004).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FullDate(pub String);
+pub struct FullDate(String);
 
 impl FullDate {
     /// Create a new FullDate from a string.
-    pub fn new(date: &str) -> Self {
-        Self(date.to_string())
+    pub fn new(date: &str) -> Result<Self, MdocError> {
+        if date.len() != 10
+            || date.as_bytes()[4] != b'-'
+            || date.as_bytes()[7] != b'-'
+            || date
+                .as_bytes()
+                .iter()
+                .enumerate()
+                .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
+            || chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err()
+        {
+            return Err(MdocError::Cbor("invalid full-date".into()));
+        }
+        Ok(Self(date.to_owned()))
     }
 
     /// Get the date string.
@@ -29,18 +41,17 @@ impl FullDate {
         Value::Tag(TAG_FULL_DATE, Box::new(Value::Text(self.0.clone())))
     }
 
-    /// Decode from a CBOR value (Tag 1004 or plain text).
+    /// Decode a Tag 1004 full-date. Untagged text is not accepted.
     pub fn from_cbor(value: &Value) -> Result<Self, MdocError> {
         match value {
             Value::Tag(TAG_FULL_DATE, inner) => match inner.as_ref() {
-                Value::Text(s) => Ok(Self(s.clone())),
+                Value::Text(s) => Self::new(s),
                 _ => Err(MdocError::Cbor(
                     "Tag 1004 inner value is not text".to_string(),
                 )),
             },
-            Value::Text(s) => Ok(Self(s.clone())),
             _ => Err(MdocError::Cbor(format!(
-                "expected Tag 1004 or text, got {:?}",
+                "expected Tag 1004, got {:?}",
                 value
             ))),
         }
@@ -59,7 +70,7 @@ mod tests {
 
     #[test]
     fn full_date_round_trip() {
-        let date = FullDate::new("1990-01-15");
+        let date = FullDate::new("1990-01-15").unwrap();
         let cbor = date.to_cbor();
         let decoded = FullDate::from_cbor(&cbor).unwrap();
         assert_eq!(decoded, date);
@@ -68,7 +79,7 @@ mod tests {
     #[test]
     fn full_date_from_plain_text() {
         let val = Value::Text("2026-03-19".to_string());
-        let date = FullDate::from_cbor(&val).unwrap();
-        assert_eq!(date.as_str(), "2026-03-19");
+        assert!(FullDate::from_cbor(&val).is_err());
+        assert!(FullDate::new("2026-02-30").is_err());
     }
 }

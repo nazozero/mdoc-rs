@@ -1,0 +1,189 @@
+# Protocol profile, evidence and responsibility matrix
+
+Review date: **2026-11-17**. Production comparison point:
+`nazozero/mdoc-rs`, branch `nazoauth/patched-rustcrypto`, commit
+`9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc` (`mdoc-rs` 0.2.0,
+`default-features = false`, `features = ["issue"]`).
+
+This document describes the selected server-side protocol profile and its
+verification boundaries. It is not an ISO certification, a claim that every
+reader/wallet feature is implemented, or a transfer of earlier certification to
+new code. Test names identify executable contracts; an entry does not by itself
+assert that the test passed on a particular target. Release evidence must record
+the tested revision, command, target, inputs and result.
+
+## Sources and evidence limits
+
+The [OpenID specifications catalogue](https://openid.net/sg/openid4vc/specifications/)
+and explicitly versioned Final specifications govern the OpenID profile.
+Earlier drafts and old test fixtures do not override them.
+
+| Document | Reviewed source and edition | Applicability and evidence boundary |
+| --- | --- | --- |
+| ISO/IEC 18013-5 | [ISO catalogue, 2021 edition](https://www.iso.org/standard/69084.html); [public incorporation-by-reference copy](https://law.resource.org/pub/us/cfr/ibr/inc/iec/iec.18013-5.2021.pdf) | Selected data structures, authentication and validation clauses were inspected. The latter is a Public.Resource.Org delivery of the ISO text, not an ISO-owned publication service. Its copyright remains with ISO/IEC; no standard text is vendored here. Proximity transport, full mDL reader conformance and certification are outside this core. |
+| ISO/IEC TS 18013-7 | [ISO catalogue, 2025 edition](https://www.iso.org/standard/91154.html); [ANSI/DS preview](https://webstore.ansi.org/preview-pages/DS/preview_M390700CURES.pdf) | The 2025 edition supersedes 2024. Its preview's normative references include OpenID4VP Draft 18. Complete licensed text was not obtained. Do not equate that draft-dependent profile with OpenID4VP Final or claim a complete clause audit. |
+| ISO/IEC 23220-1 | [2023 catalogue](https://www.iso.org/standard/74910.html) | General architecture context. Public catalogue evidence only; no whole-standard compliance claim. |
+| ISO/IEC TS 23220-2 | [2026 edition catalogue](https://www.iso.org/standard/91155.html) | Supersedes 2024. Data-object profiles can be layered above the generic core; complete licensed clauses were unavailable. |
+| ISO/IEC TS 23220-3 | [2026 catalogue](https://www.iso.org/standard/86783.html) | Installation/issuance protocol scope; not evidence that the OpenID4VCI service implements this separate protocol. Full-text review remains outstanding. |
+| ISO/IEC TS 23220-4 | [2026 catalogue](https://www.iso.org/standard/86785.html), [official OBP preview](https://www.iso.org/obp/ui?_escaped_fragment_=iso%3Astd%3Aiso-iec%3Ats%3A23220%3A-4%3Aed-1%3Av1%3Aen) | The public preview exposes encoding, device/server retrieval and browser/app scope, but withholds normative sections. Selected 18013-5 building blocks are not complete 23220-4 conformance. |
+| ISO/IEC DTS 23220-5 | [project catalogue](https://www.iso.org/standard/86786.html) | Trust-model work remained under development at review. Trust belongs to NazoAuth; do not cite this project as a published Final standard. |
+| ISO/IEC TS 23220-6 | [2025 catalogue](https://www.iso.org/standard/86787.html) | Secure-area certification is a wallet/hardware concern; the server core does not certify hardware. |
+| OpenID4VCI | [1.0 Final](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html), Appendix A.2 | Core IssuerSigned preparation; NazoAuth owns endpoints, proof, authorization, encryption, metadata and key leases. |
+| OpenID4VP | [1.0 Final](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html), Appendix B.2 | Final Redirect and DC API Handover are separate constructors. NazoAuth enables `direct_post` and `direct_post.jwt`, not DC API transport. |
+| OpenID4VC HAIP | [1.0 Final](https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0-final.html), §§5.3.1, 7, 8 | NazoAuth selects one mdoc per DeviceResponse and its algorithm policy. §6.1 concerns SD-JWT status; it is not an mdoc status requirement. |
+| COSE structures | [RFC 9052](https://www.rfc-editor.org/rfc/rfc9052.html), §§3, 4, 6, 7, 9, 10 | Signature/MAC structures, headers and key representation, with ISO/OpenID profile restrictions. |
+| COSE algorithms | [RFC 9053](https://www.rfc-editor.org/rfc/rfc9053.html), §§2, 7 | Primitive selection and key/algorithm binding. Unsupported curves are rejected. |
+| COSE X.509 headers | [RFC 9360](https://www.rfc-editor.org/rfc/rfc9360.html), §§2–3 | Supplemental review. ISO 2021's unprotected `x5chain` profile predates this final RFC; see the compatibility boundary below. |
+| CBOR | [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html), §§3.4.5.1, 4, 5.6, 10 | Data validity, embedded CBOR, encoding profiles and resource limits. Generic validity and a chosen deterministic encoding are distinct. |
+| Date tags | [RFC 8943](https://www.rfc-editor.org/rfc/rfc8943.html); [RFC 9581](https://www.rfc-editor.org/rfc/rfc9581.html) | Tag 1004 is full-date and Tag 100 is epoch-date. Extended time/period tags do not replace the MSO's Tag 0 profile. Values remain typed CBOR for application schemas. |
+| URI syntax | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986.html); [iri-string `UriStr`](https://docs.rs/iri-string/latest/iri_string/types/type.UriStr.html) | Borrowed URI syntax validation. Syntax acceptance does not authorize fetching a target. |
+| Token Status List | [draft-ietf-oauth-status-list-21](https://www.ietf.org/archive/id/draft-ietf-oauth-status-list-21.html); [IETF history](https://datatracker.ietf.org/doc/draft-ietf-oauth-status-list/history/) | Revision 21, dated 2026-06-21, remains the compatibility baseline. Latest recorded RPC update at review: 2026-11-12, “Awaiting Second editor”. Still in the RFC Editor queue, not a published RFC. |
+
+### Capability classifications
+
+* **Required core**: needed to parse/authenticate the selected profile; failures
+  reject the affected operation without a silent downgrade.
+* **Optional core**: explicitly selected capability with its own contract.
+* **NazoAuth enabled**: exercised by the integration's selected policy.
+* **Not implemented**: rejected or unavailable, never advertised as supported.
+* **Not a server-core responsibility**: delegated to a named owner; delegation
+  does not remove the security requirement.
+
+This component does not implement all Brainpool/Ed448 combinations, proximity
+transport, secure-area lifecycle, wallet UI or a trust-list service. Selected
+P-256/P-384/P-521 and Ed25519 primitives do not imply general reader conformance.
+NazoAuth currently rejects DeviceMAC and selects DeviceSignature.
+
+## Core requirement-to-code/test map
+
+Paths are relative to this repository. Structural tests are separate from
+signature verification and final trust decisions. Entries naming a test category
+rather than a concrete test name remain release-evidence work for that owner.
+
+| ID | Basis / classification | Core contract | Implementation | Regression contract |
+| --- | --- | --- | --- | --- |
+| CBOR-01 | RFC 8949 §§4, 5.6; required | Reject duplicate keys, trailing data, invalid UTF-8, unsupported map-key shapes and non-shortest/indefinite profile encodings before decoded allocation. | `src/cbor/raw.rs` | Raw CBOR corpus; `mso_security::embedded_duplicates_nonshortest_and_indefinite_lengths_are_rejected` |
+| CBOR-02 | RFC 8949 §10; required | Bound bytes, nesting, item counts and collection sizes; embedded Tag 24 shares the enclosing budget. | `src/cbor/raw.rs::Limits` | Resource-limit/adversarial CBOR tests; fuzz target |
+| CBOR-03 | RFC 8949 §3.4.5.1; required | Tag 24 contains exactly one embedded CBOR item. | `src/cbor/raw.rs::tag24_inner` | `mso_security::mso_requires_exactly_one_tag24_embedded_map` |
+| CBOR-04 | ISO §8.1; required | Retain received ordering and authenticated bytes; sorting is not required for acceptance. | Raw envelopes in parser/models | `mso_security::original_mso_bytes_and_unsorted_map_order_are_preserved` |
+| COSE-01 | RFC 9052 §§3, 3.1; required | Reject duplicate/cross-bucket labels and unknown/unprocessed/misplaced critical semantics. | `src/cose/mod.rs`; `src/parser.rs` | `parser_security::empty_security_headers_cannot_disappear_during_cose_decoding`; `duplicate_header_labels_are_rejected_across_buckets_even_for_empty_kid`; `unknown_text_private_and_unsigned_header_labels_fail_closed`; critical-header unit regressions |
+| COSE-02 | RFC 9052 §§4.2, 4.4, 9; required | Sig_structure uses original protected bytes/payload; detached mode is explicit. | `src/cose/verify.rs`; `src/device_auth.rs` | Independent signature vector; payload/header/AAD and detached-mode regressions |
+| COSE-03 | RFC 9053 §§2, 7; required | Bind key type, curve, algorithm and operations; reject invalid points, private material and unsupported combinations. Fixed-width ECDSA R\|\|S. | `src/cose/key.rs`; `src/cose/verify.rs` | Algorithm-confusion, curve/key-ops and malformed-key regressions |
+| COSE-04 | RFC 9052 §§6.2–6.3; optional | Mac0 requires the supported algorithm and caller-authorized session key. | `src/device_auth.rs` | MAC/tag/key/AAD mutations; NazoAuth rejects MAC |
+| COSE-05 | Original protected-header evidence; required | Reject malformed/nonminimal/trailing protected CBOR and disagreement with the decoded header. Empty bytes may decode but do not authenticate an algorithm. | `src/cose/mod.rs`; `src/parser.rs` | `parser_security::protected_headers_reject_duplicate_nonminimal_or_trailing_cbor`; `empty_protected_bstr_is_decodable_but_does_not_claim_authentication`; `a_single_empty_kid_is_retained_as_a_valid_header_presence` |
+| X509-01 | ISO §9.1.2.4; required | `x5chain` uses the designated bucket; every chain member must be well-formed. | `src/model/issuer_auth.rs` | `x5chain_checks_every_entry_and_borrows_the_leaf`; `missing_duplicate_or_protected_x5chain_is_rejected` |
+| X509-02 | RFC 9360; boundary | Extraction returns untrusted DER, not trust anchors. | `src/model/issuer_auth.rs` | Malformed-later-entry regression; integration path tests |
+| MSO-01 | ISO §9.1.2.4; required | Version 1.0 and mandatory members, including DeviceKeyInfo. | `parse_mso_value` in `src/model/issuer_auth.rs` | `mandatory_mso_fields_and_version_are_enforced`; `device_key_is_required_and_information_extensions_are_preserved` |
+| MSO-02 | ISO §9.1.2.4; required | Require Tag 24; decode borrowed inner bytes once. | `IssuerAuth::mso` | `mso_requires_exactly_one_tag24_embedded_map`; original-byte regression |
+| MSO-03 | ISO §§9.1.2.4–9.1.2.5; required | Digest name/length and `0 <= digestID < 2^31` checked together. | `parse_value_digests` | `digest_algorithms_and_output_lengths_are_bound`; `digest_identifiers_and_namespace_shapes_are_strict`; property boundary test |
+| MSO-04 | ISO §9.1.2.4; required | Tag 0, UTC `Z`, whole seconds; `signed <= validFrom < validUntil`. | `parse_datetime`; `ValidityInfo::validate` | `timestamp_tag_and_iso_utc_whole_second_profile_are_required`; `validity_order_and_required_members_are_enforced` |
+| MSO-05 | ISO §9.1.2.4; required when present | Nonempty, typed, disjoint KeyAuthorizations; no filtering malformed items. | `parse_key_authorizations` | `key_authorizations_preserve_both_disjoint_forms`; `malformed_or_overlapping_key_authorizations_are_rejected_without_filtering` |
+| MSO-06 | Extension boundary; required | Preserve MSO/DeviceKeyInfo extensions and integer keyInfo for explicit policy. Unknown validity/authorization semantics reject. | `src/model/types.rs`; MSO parser | `device_key_is_required_and_information_extensions_are_preserved`; unknown semantic regressions |
+| ITEMS-01 | ISO §9.1.2.5; required | Hash received IssuerSignedItemBytes; check item random/identifier/digest relationships. | `src/model/issuer_signed_item.rs`; parser/verifier | Annex D digest vector; random/ID/missing-digest/tampered-envelope regressions |
+| ITEMS-02 | Selective disclosure; required | Missing undisclosed values are permitted; supplied values must match authenticated digests without identifier collisions. | `src/verifier.rs`; `src/disclosure.rs` | `parser_security::issuer_namespaces_may_be_absent_but_cannot_be_an_explicit_empty_map`; selective/duplicate-disclosure regressions |
+| DEVICE-01 | ISO §§9.1.3.4, 9.1.3.6; required | Tag 24 DeviceAuthenticationBytes binds docType, transcript, received namespaces. | `src/session.rs`; `src/device_auth.rs` | Independent encoding and original-namespace-order tests in `session_final` |
+| DEVICE-02 | ISO §9.1.3.4; required | Authenticated MSO key and explicit device-element authorization. | `src/verifier.rs`; `src/cose/key.rs`; `src/response_builder.rs` | `response_external::preparing_rejects_unauthorized_device_namespaces`; `element_authorizations_do_not_authorize_other_elements_in_same_namespace`; wrong-holder/docType regressions |
+| DEVICE-03 | ISO §§9.1.3.5, 9.1.5.1; optional | EMacKey salt hashes Tag 24 SessionTranscriptBytes. | `src/session.rs` | `emac_key_matches_independent_hkdf_vector_with_tag24_salt` |
+| RESPONSE-01 | ISO §8.3.2.1.2.2; required | Validate response shape/version/status and configured document count. | `src/parser.rs` | Shape/version/status/empty/multiple-document regressions |
+| RESPONSE-02 | HAIP §5.3.1; NazoAuth enabled | `max_documents = 1`; separate credentials use separate responses. | Caller profile; parser | NazoAuth whole-response rejection tests |
+| VERIFY-01 | ISO §9.3.1; required | Match docTypes; check current MSO validity and signed-time leaf-certificate interval. | `src/verifier.rs` | Expired/not-yet-valid/signing-time/certificate-boundary regressions |
+| VERIFY-02 | Trust boundary; required | Protocol-authenticated output remains pending external trust and revocation. | `src/verifier.rs` | Pending-trust API plus NazoAuth admission tests |
+| ISSUE-01 | OID4VCI A.2.4; NazoAuth enabled | External signing input; verified completion; IssuerSigned assembly without key custody. | `src/builder.rs`; `src/encoder.rs::encode_issuer_signed` | External-signing roundtrip, wrong result/key and IssuerSigned wire shape |
+| ISSUE-02 | Profile contract; required | Reuse schema validation during issuance, including final CBOR bounds. | Builder; `parse_mso_value` | Issuance rejects structures the parser would reject |
+| ISSUE-03 | External holder signing; optional | Prepare Sig_structure; verify returned signature; emit detached DeviceSignature without key custody. | `src/response_builder.rs` | `response_external::external_holder_signs_sig_structure_and_finishes_a_detached_proof`; `external_holder_wrong_key_altered_input_and_der_signatures_are_rejected`; `preparing_rejects_algorithm_curve_mismatch_and_unsupported_algorithms` |
+| ENCODE-01 | Original signed-byte integrity; required | Encoding retains raw protected headers, disclosures and namespaces; attaching a device payload is rejected. | `src/encoder.rs` | `response_external::encoder_preserves_original_protected_header_bytes`; `encoder_never_substitutes_decoded_attributes_for_signed_item_bytes`; `encoder_cannot_silently_attach_a_device_signature_payload`; `official_annex_d_signed_items_and_payloads_survive_encoding_exactly` |
+
+The old parser accepted Tag 1 epoch time in MSO ValidityInfo. The current test
+explicitly rejects it because this profile uses Tag 0. This is a deliberate
+acceptance-boundary correction. Empty `docType` is also rejected as an application
+profile restriction, not because generic `tstr` grammar alone forbids it.
+
+### X.509 header compatibility boundary
+
+ISO 18013-5:2021 specifies unprotected `x5chain` using its then-current X.509 COSE
+reference. RFC 9360 later formalized additional certificate-integrity requirements
+and a single-certificate `bstr` / multiple-certificate array encoding. This core
+retains the deployed ISO interpretation, including a one-element array, while
+rejecting empty or partly malformed chains. It does not claim every generic RFC
+9360 application profile. NazoAuth's authenticated path and scoped-IACA policy
+still govern certificate identity; no incoming self-signed certificate becomes
+trusted merely by being included.
+
+## Final SessionTranscript profile
+
+Final handovers are distinct from historical draft layouts. Constructors bind a
+trusted request context; validation compares its complete expected encoding with
+the supplied original bytes. Syntax alone is not request binding.
+
+| Requirement | Source / capability | Implementation | Tests in `tests/session_final.rs` unless noted |
+| --- | --- | --- | --- |
+| Redirect binds full Client ID, nonce, optional encryption-key JWK thumbprint and Response URI through HandoverInfo's hash | OID4VP Final B.2.6.1; NazoAuth enabled | `src/session.rs`; NazoAuth service | `final_redirect_matches_official_vector_and_borrows_validated_bytes`; `every_redirect_context_parameter_is_bound` |
+| DC API binds its distinct handover/origin | OID4VP Final B.2.6.2; optional core, NazoAuth transport disabled | `src/session.rs` | `final_dc_api_matches_official_vector_and_borrows_validated_bytes`; `every_dc_api_context_parameter_and_transport_is_bound` |
+| JWK thumbprint uses required members and canonical JSON | [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638.html); with encryption | `src/session.rs` | `official_thumbprint_excludes_optional_jwk_members` |
+| Unencrypted mode binds null, not a placeholder | OID4VP Final B.2.6 | `src/session.rs` | `unencrypted_modes_bind_null_instead_of_empty_or_text_thumbprint` |
+| Exact original-byte and context integrity | OID4VP Final B.2.6; required | `src/session.rs` | `every_byte_of_the_official_transcript_is_authenticated_by_context`; `rejects_old_draft_handover_as_final`; `structural_validation_rejects_malformed_nonminimal_or_trailing_cbor` |
+| Actual JWE decryption key matches advertised transcript-bound key | NazoAuth endpoint | Response processing | NazoAuth `encrypted_response_key_matches_the_key_bound_by_the_handover` |
+| Generated/borrowed paths agree across contexts | Property test, not certification | `src/session.rs` | `arbitrary_context_roundtrips_bind_and_match_ciborium` |
+
+The ISO -7:2025 preview's Draft 18 dependency is an evidence boundary. Final
+support does not establish every mechanism/transport in that separate ISO profile.
+
+## MSO status: presence, authentication and ownership
+
+The original 2021 MSO schema has no status extension. This project explicitly
+selects draft-21 §6.3 for that extension. The parser retains the whole CBOR value
+and validates the known reference's shape. NazoAuth applies a stricter supported
+mechanism policy after authentication. Unknown presence never becomes absence.
+
+| ID | Contract / classification | Owner | Executable evidence |
+| --- | --- | --- | --- |
+| STATUS-01 | Absent/known/unknown distinct; preserve decoded members and signed payload. Required. | Core `MsoStatus` | `absence_is_distinct_from_unknown_or_known_status`; `unknown_status_payloads_cannot_be_silently_discarded` |
+| STATUS-02 | Invalid structure, non-unsigned index and duplicates reject. Required. | MSO/CBOR parsers | `malformed_status_is_never_treated_as_absence`; `all_unsigned_status_indices_are_preserved` |
+| STATUS-03 | URI syntax and original spelling. HTTPS, network/DNS/redirect policy are upper-owned. | Core `UriStr`; NazoAuth resolver | `status_uri_uses_rfc3986_without_normalizing_or_authorizing_fetch`; resolver tests |
+| STATUS-04 | Unsupported mechanisms/members and lossy CBOR projection reject. NazoAuth enabled. | Status projection | `mdoc_status_projection_preserves_presence_and_rejects_unknown_semantics`; `authenticated_unknown_mdoc_status_cannot_become_absent` |
+| STATUS-05 | Authenticate credential before resolving status. Required. | Core result; NazoAuth verifier | `credential_verifier_resolves_signed_status_after_authentication`; `verifier_requires_status_resolver_for_mdoc` |
+| STATUS-06 | Validate list signature, authorized signer, URI, time and index. NazoAuth enabled. | Existing draft-21 validator | `signed_cwt_lists_validate_cose_and_fail_closed`; `mdoc_status_signer_must_belong_to_the_credential_iaca` |
+| STATUS-07 | Revoked/suspended/unknown/unavailable status fails closed. NazoAuth policy. | Status verifier/resolver | Credential-verifier and signed-CWT failure matrix |
+| STATUS-08 | Never omit a signing input status. Default rejects; explicit policy needs a real authenticated published list and status-zero entry. | NazoAuth signer | `mdoc_issuance_requires_explicit_policy_and_an_authenticated_published_list` |
+| STATUS-09 | Index allocation/publication maintenance is embedding-owned; ordinary endpoints do not supply it. Not implemented by shipped endpoints. | Application publisher | Missing resolver/list rejects; no invented URI/list |
+| STATUS-10 | Editing or removing an issuer-signed status invalidates the credential before any list resolution. Required. | Core issuer-signature check; NazoAuth ordering | `mdoc_status_tampering_or_removal_fails_before_status_resolution` |
+
+Draft-21 §8.3 governs processing and §11.3 status-issuer authorization. Issuer
+certificate revocation, credential status and authorization of a status signer
+remain separate decisions. A trusted signer under a different IACA is insufficient
+for NazoAuth's policy. The core adds no second HTTP/status client.
+
+## Security responsibilities across the boundary
+
+| Check | Protocol core output | NazoAuth completion requirement |
+| --- | --- | --- |
+| CBOR/COSE/digests/MSO/current validity/signed-time containment/holder proof | Fail-closed protocol authentication or a typed pending-trust document | Cannot override core failures |
+| X.509 path/document-signing profile | Original untrusted DER chain in a checked container | Path, anchor scope, CA constraints, critical extensions, EKU/profile and issuer identity |
+| Certificate revocation | No CRL/snapshot freshness claim | Existing authenticated-path revocation policy |
+| Credential status | Complete authenticated extension | Supported mechanism, availability, signature, issuer/IACA, URI, time, index and state |
+| Final request binding | Constructor/validator bound to supplied context | Retained transaction context and actual response-encryption key |
+| Final admission | No shortcut implying external trust | `VerifiedCredential` only after every applicable check |
+| External signing | Exact signing bytes, checked completion; no custody | One pinned lease, authorized issuance/status policy, publication responsibilities |
+
+Integration evidence is documented in NazoAuth's
+`docs/protocol/openid4vc-validation.md`, OpenID4VP service-contract tests and
+`crates/authorization-server/tests/unit/domain/openid4vc/credential_crypto/status.rs`.
+Migration must execute those tests, not merely compile a replacement dependency.
+
+## Deliberate limitations and remaining evidence gates
+
+* Full-text clause review remains incomplete for ISO -7 and the 23220 series;
+  public abstracts/previews do not justify complete-conformance claims.
+* Optional MAC, all ISO curve families, proximity/device transport, secure-area
+  certification and wallet behavior are not NazoAuth's enabled profile.
+* Compound/floating-point CBOR map keys are rejected. Arbitrary value retention
+  does not imply support for every CBOR extension.
+* Unknown MSO/DeviceKeyInfo/status information requires explicit profile handling.
+  Unknown security semantics are never harmless absence.
+* URI syntax cannot prove a host safe or an index allocated. NazoAuth owns fetch
+  policy and the embedding owns allocation/publication.
+* Annex D/Final vectors establish specific interoperability evidence, not
+  certification or coverage of every algorithm, wallet, issuer and transport.
+* Release evidence must separately record minimum/all-feature builds, target/WASM
+  checks, fuzz duration/corpus, advisories, comparable CPU/allocation measurements
+  and end-to-end latency. Source mappings are not those measurements.

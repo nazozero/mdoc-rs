@@ -1,548 +1,444 @@
-//! IssuerAuth — COSE_Sign1 wrapper with MSO extraction.
+//! IssuerAuth — COSE_Sign1 with strict MSO parsing and untrusted certificates.
 
-use super::types::{DeviceKeyInfo, Mso, ValidityInfo};
+use super::types::{
+    DeviceKeyInfo, DigestAlgorithm, KeyAuthorizations, Mso, MsoStatus, StatusListInfo, ValidityInfo,
+};
 use crate::error::MdocError;
-use coset::CoseSign1;
+use ciborium::Value;
+use coset::{AsCborValue, CoseKey, CoseSign1};
+use std::collections::HashMap;
 
 /// Issuer authentication (COSE_Sign1 containing the MSO).
 #[derive(Clone, Debug)]
 pub struct IssuerAuth {
-    /// The raw COSE_Sign1 structure.
+    /// Original COSE object, including the received protected-header and payload
+    /// bytes. Decoding its claims does not authenticate them.
     pub cose_sign1: CoseSign1,
 }
 
 impl IssuerAuth {
-    /// Create from a CoseSign1.
+    /// Wrap a COSE object. This does not validate its signature or trust chain.
     pub fn new(cose_sign1: CoseSign1) -> Self {
         Self { cose_sign1 }
     }
 
-    /// Decode the MSO from the COSE_Sign1 payload.
+    /// Parse the MSO from its mandatory Tag 24 payload.
     ///
-    /// The payload is a Tag 24 encoded CBOR containing the MSO.
+    /// The returned data is structurally checked, but remains unauthenticated
+    /// until the issuer signature has been verified. The original payload is
+    /// never replaced by re-encoded data.
     pub fn mso(&self) -> Result<Mso, MdocError> {
         let payload = self
             .cose_sign1
             .payload
-            .as_ref()
-            .ok_or_else(|| MdocError::Mso("missing COSE_Sign1 payload".to_string()))?;
-
-        // ISO 18013-5 §9.1.2.4: the payload is
-        // `MobileSecurityObjectBytes = #6.24(bstr .cbor MobileSecurityObject)`,
-        // i.e. the MSO map wrapped in CBOR Tag 24. Conformant issuers (e.g. the
-        // ISO Annex D vector) emit the tag; some implementations inline the raw
-        // map. Accept both: unwrap Tag 24 when present, otherwise treat the
-        // decoded value as the MSO directly.
-        let decoded: ciborium::Value = ciborium::from_reader(payload.as_slice())
-            .map_err(|e| MdocError::Mso(format!("decode MSO CBOR: {e}")))?;
-
-        let mso_value = match &decoded {
-            ciborium::Value::Tag(crate::cbor::data_item::TAG_ENCODED_CBOR, inner) => {
-                let bytes = inner.as_bytes().ok_or_else(|| {
-                    MdocError::Mso(
-                        "MobileSecurityObjectBytes Tag 24 inner is not bytes".to_string(),
-                    )
-                })?;
-                ciborium::from_reader(bytes.as_slice())
-                    .map_err(|e| MdocError::Mso(format!("decode inner MSO CBOR: {e}")))?
-            }
-            _ => decoded,
-        };
-
-        parse_mso(&mso_value)
+            .as_deref()
+            .ok_or_else(|| mso_error("missing COSE_Sign1 payload"))?;
+        let bytes = crate::cbor::raw::tag24_inner(payload)?;
+        let mso: Value =
+            ciborium::from_reader(bytes).map_err(|e| mso_error(format!("decode MSO: {e}")))?;
+        parse_mso_value(&mso)
     }
 
-    /// Extract the issuer certificate (DER) from the COSE unprotected header's x5chain.
-    pub fn certificate_der(&self) -> Result<Vec<u8>, MdocError> {
-        // x5chain is label 33 in COSE headers
-        let x5chain_label = coset::Label::Int(33);
-
-        // Check unprotected header first
-        for (label, value) in &self.cose_sign1.unprotected.rest {
-            if *label == x5chain_label {
-                return extract_first_cert(value);
-            }
+    /// Borrow the leaf certificate's DER from the unprotected x5chain header.
+    ///
+    /// Every chain element is checked before returning the leaf. The certificate
+    /// remains untrusted; its presence cannot install a trust anchor.
+    pub fn certificate_der(&self) -> Result<&[u8], MdocError> {
+        let value = self.x5chain()?;
+        validate_cert_chain(value)?;
+        match value {
+            Value::Bytes(bytes) => Ok(bytes),
+            Value::Array(chain) => chain[0]
+                .as_bytes()
+                .map(Vec::as_slice)
+                .ok_or_else(|| certificate_error("x5chain entry is not bytes")),
+            _ => Err(certificate_error("x5chain is not bytes or an array")),
         }
-
-        Err(MdocError::Certificate(
-            "no x5chain in COSE_Sign1 unprotected header".to_string(),
-        ))
     }
 
-    /// Extract the full certificate chain from the x5chain header.
+    /// Extract a checked representation of the untrusted certificate chain.
+    /// This checks the container, not DER syntax, certificate signatures or trust.
     pub fn certificate_chain_der(&self) -> Result<Vec<Vec<u8>>, MdocError> {
-        let x5chain_label = coset::Label::Int(33);
+        let value = self.x5chain()?;
+        validate_cert_chain(value)?;
+        match value {
+            Value::Bytes(bytes) => Ok(vec![bytes.clone()]),
+            Value::Array(chain) => chain
+                .iter()
+                .map(|value| {
+                    value
+                        .as_bytes()
+                        .cloned()
+                        .ok_or_else(|| certificate_error("x5chain entry is not bytes"))
+                })
+                .collect(),
+            _ => Err(certificate_error("x5chain is not bytes or an array")),
+        }
+    }
 
-        for (label, value) in &self.cose_sign1.unprotected.rest {
-            if *label == x5chain_label {
-                return extract_cert_chain(value);
+    fn x5chain(&self) -> Result<&Value, MdocError> {
+        let label = coset::Label::Int(33);
+        if self
+            .cose_sign1
+            .protected
+            .header
+            .rest
+            .iter()
+            .any(|(key, _)| *key == label)
+        {
+            return Err(certificate_error(
+                "ISO mdoc x5chain must be in the unprotected header",
+            ));
+        }
+        let mut found = None;
+        for (key, value) in &self.cose_sign1.unprotected.rest {
+            if *key == label && found.replace(value).is_some() {
+                return Err(certificate_error("duplicate x5chain header"));
             }
         }
-
-        Err(MdocError::Certificate(
-            "no x5chain in COSE_Sign1 unprotected header".to_string(),
-        ))
+        found.ok_or_else(|| certificate_error("missing x5chain in unprotected header"))
     }
 }
 
-/// Extract the first certificate from an x5chain value.
-fn extract_first_cert(value: &ciborium::Value) -> Result<Vec<u8>, MdocError> {
-    match value {
-        ciborium::Value::Bytes(b) => Ok(b.clone()),
-        ciborium::Value::Array(arr) => {
-            if let Some(ciborium::Value::Bytes(b)) = arr.first() {
-                Ok(b.clone())
-            } else {
-                Err(MdocError::Certificate("empty x5chain array".to_string()))
-            }
-        }
-        _ => Err(MdocError::Certificate(
-            "x5chain is not bytes or array".to_string(),
-        )),
-    }
+fn certificate_error(message: impl Into<String>) -> MdocError {
+    MdocError::Certificate(message.into())
 }
 
-/// Extract all certificates from an x5chain value.
-fn extract_cert_chain(value: &ciborium::Value) -> Result<Vec<Vec<u8>>, MdocError> {
+fn validate_cert_chain(value: &Value) -> Result<(), MdocError> {
     match value {
-        ciborium::Value::Bytes(b) => Ok(vec![b.clone()]),
-        ciborium::Value::Array(arr) => {
-            let mut chain = Vec::new();
-            for item in arr {
-                if let ciborium::Value::Bytes(b) = item {
-                    chain.push(b.clone());
-                } else {
-                    return Err(MdocError::Certificate(
-                        "x5chain array contains non-bytes".to_string(),
+        Value::Bytes(bytes) if !bytes.is_empty() => Ok(()),
+        Value::Array(chain) if !chain.is_empty() => {
+            for certificate in chain {
+                if !matches!(certificate, Value::Bytes(bytes) if !bytes.is_empty()) {
+                    return Err(certificate_error(
+                        "x5chain entries must be nonempty byte strings",
                     ));
                 }
             }
-            Ok(chain)
+            Ok(())
         }
-        _ => Err(MdocError::Certificate(
-            "x5chain is not bytes or array".to_string(),
+        _ => Err(certificate_error(
+            "x5chain must contain at least one nonempty certificate",
         )),
     }
 }
 
-/// Parse an MSO from a CBOR Value.
-fn parse_mso(value: &ciborium::Value) -> Result<Mso, MdocError> {
-    use super::types::DigestAlgorithm;
-    use std::collections::HashMap;
+fn mso_error(message: impl Into<String>) -> MdocError {
+    MdocError::Mso(message.into())
+}
 
-    let map = value
+fn as_map<'a>(value: &'a Value, field: &str) -> Result<&'a [(Value, Value)], MdocError> {
+    value
         .as_map()
-        .ok_or_else(|| MdocError::Mso("MSO is not a CBOR map".to_string()))?;
+        .map(Vec::as_slice)
+        .ok_or_else(|| mso_error(format!("{field} is not a CBOR map")))
+}
 
+fn as_text<'a>(value: &'a Value, field: &str) -> Result<&'a str, MdocError> {
+    value
+        .as_text()
+        .ok_or_else(|| mso_error(format!("{field} is not text")))
+}
+
+fn set_once<T>(slot: &mut Option<T>, value: T, field: &str) -> Result<(), MdocError> {
+    if slot.replace(value).is_some() {
+        return Err(mso_error(format!("duplicate {field}")));
+    }
+    Ok(())
+}
+
+fn required<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
+    value.ok_or_else(|| mso_error(format!("missing {field}")))
+}
+
+/// Parse and validate the MSO schema for byte decoding and issuance preparation.
+/// Raw byte inputs must first pass `cbor::raw::validate`. Builders also validate
+/// their final encoding so arbitrary extension values cannot carry duplicate keys.
+pub(crate) fn parse_mso_value(value: &Value) -> Result<Mso, MdocError> {
     let mut version = None;
     let mut digest_algorithm = None;
     let mut doc_type = None;
     let mut validity_info = None;
-    let mut value_digests: HashMap<String, HashMap<u32, Vec<u8>>> = HashMap::new();
-    let mut _device_key_info = None;
+    let mut value_digests = None;
+    let mut device_key_info = None;
     let mut status = None;
+    let mut additional_fields = HashMap::new();
 
-    for (k, v) in map {
-        let key = k
-            .as_text()
-            .ok_or_else(|| MdocError::Mso("MSO key is not text".to_string()))?;
-
+    for (key, value) in as_map(value, "MSO")? {
+        let key = as_text(key, "MSO key")?;
         match key {
-            "version" => {
-                version = v.as_text().map(|s| s.to_string());
-            }
+            "version" => set_once(&mut version, as_text(value, key)?.to_owned(), key)?,
             "digestAlgorithm" => {
-                let alg_str = v
-                    .as_text()
-                    .ok_or_else(|| MdocError::Mso("digestAlgorithm is not text".to_string()))?;
-                digest_algorithm = DigestAlgorithm::from_str_name(alg_str);
+                let name = as_text(value, key)?;
+                let algorithm = DigestAlgorithm::from_str_name(name)
+                    .ok_or_else(|| MdocError::UnsupportedAlgorithm(name.to_owned()))?;
+                set_once(&mut digest_algorithm, algorithm, key)?;
             }
-            "docType" => {
-                doc_type = v.as_text().map(|s| s.to_string());
-            }
-            "valueDigests" => {
-                if let Some(ns_map) = v.as_map() {
-                    for (ns_key, ns_val) in ns_map {
-                        let ns = ns_key
-                            .as_text()
-                            .ok_or_else(|| MdocError::Mso("namespace key is not text".to_string()))?
-                            .to_string();
-                        let mut digests = HashMap::new();
-                        if let Some(digest_map) = ns_val.as_map() {
-                            for (digest_id_val, digest_bytes_val) in digest_map {
-                                let digest_id = digest_id_val
-                                    .as_integer()
-                                    .and_then(|i| {
-                                        u32::try_from({
-                                            let v: i128 = i.into();
-                                            v
-                                        })
-                                        .ok()
-                                    })
-                                    .ok_or_else(|| {
-                                        MdocError::Mso("digestID is not an integer".to_string())
-                                    })?;
-                                let digest_bytes = digest_bytes_val
-                                    .as_bytes()
-                                    .ok_or_else(|| {
-                                        MdocError::Mso("digest value is not bytes".to_string())
-                                    })?
-                                    .clone();
-                                digests.insert(digest_id, digest_bytes);
-                            }
-                        }
-                        value_digests.insert(ns, digests);
-                    }
+            "docType" => set_once(&mut doc_type, as_text(value, key)?.to_owned(), key)?,
+            "validityInfo" => set_once(&mut validity_info, parse_validity_info(value)?, key)?,
+            "valueDigests" => set_once(&mut value_digests, parse_value_digests(value)?, key)?,
+            "deviceKeyInfo" => set_once(&mut device_key_info, parse_device_key_info(value)?, key)?,
+            "status" => set_once(&mut status, parse_status(value)?, key)?,
+            _ => {
+                if additional_fields
+                    .insert(key.to_owned(), value.clone())
+                    .is_some()
+                {
+                    return Err(mso_error("duplicate MSO extension"));
                 }
             }
-            "validityInfo" => {
-                validity_info = Some(parse_validity_info(v)?);
-            }
-            "deviceKeyInfo" => {
-                _device_key_info = Some(parse_device_key_info(v)?);
-            }
-            "status" => {
-                status = Some(parse_status(v)?);
-            }
-            _ => {}
         }
     }
 
+    let version = required(version, "version")?;
+    if version != "1.0" {
+        return Err(mso_error("unsupported MSO version"));
+    }
+    let digest_algorithm = required(digest_algorithm, "digestAlgorithm")?;
+    let value_digests: HashMap<String, HashMap<u32, Vec<u8>>> =
+        required(value_digests, "valueDigests")?;
+    if value_digests
+        .values()
+        .flat_map(HashMap::values)
+        .any(|digest| digest.len() != digest_algorithm.output_size())
+    {
+        return Err(mso_error("digest length does not match digestAlgorithm"));
+    }
+    let doc_type = required(doc_type, "docType")?;
+    if doc_type.is_empty() {
+        return Err(mso_error("docType is empty"));
+    }
     Ok(Mso {
-        version: version.ok_or_else(|| MdocError::Mso("missing version".to_string()))?,
-        digest_algorithm: digest_algorithm
-            .ok_or_else(|| MdocError::Mso("missing or unsupported digestAlgorithm".to_string()))?,
-        doc_type: doc_type.ok_or_else(|| MdocError::Mso("missing docType".to_string()))?,
-        validity_info: validity_info
-            .ok_or_else(|| MdocError::Mso("missing validityInfo".to_string()))?,
+        version,
+        digest_algorithm,
+        doc_type,
+        validity_info: required(validity_info, "validityInfo")?,
         value_digests,
-        device_key_info: _device_key_info,
+        device_key_info: required(device_key_info, "deviceKeyInfo")?,
         status,
+        additional_fields,
     })
 }
 
-/// Parse the MSO `status` element (revocation info, INFO-3/INFO-4).
-///
-/// Recognizes the IETF Token Status List form
-/// (`status_list: { idx: uint, uri: tstr }`) and preserves the raw CBOR for any
-/// other/forward-compatible shape.
-fn parse_status(value: &ciborium::Value) -> Result<super::types::MsoStatus, MdocError> {
-    use super::types::{MsoStatus, StatusListInfo};
-
-    let status_list = if let Some(map) = value.as_map() {
-        if let Some((_, sl)) = map.iter().find(|(k, _)| k.as_text() == Some("status_list")) {
-            let sl_map = sl.as_map().ok_or_else(|| {
-                MdocError::Mso("status.status_list is not a CBOR map".to_string())
-            })?;
-            let idx = sl_map
-                .iter()
-                .find(|(k, _)| k.as_text() == Some("idx"))
-                .and_then(|(_, v)| v.as_integer())
-                .and_then(|i| {
-                    u64::try_from({
-                        let n: i128 = i.into();
-                        n
-                    })
-                    .ok()
-                })
-                .ok_or_else(|| {
-                    MdocError::Mso(
-                        "status.status_list.idx is not a valid unsigned integer".to_string(),
-                    )
-                })?;
-            let uri = sl_map
-                .iter()
-                .find(|(k, _)| k.as_text() == Some("uri"))
-                .and_then(|(_, v)| v.as_text())
-                .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    MdocError::Mso("status.status_list.uri is not a text string".to_string())
-                })?;
-            Some(StatusListInfo { idx, uri })
-        } else {
-            None
+fn parse_value_digests(value: &Value) -> Result<HashMap<String, HashMap<u32, Vec<u8>>>, MdocError> {
+    let namespaces = as_map(value, "valueDigests")?;
+    if namespaces.is_empty() {
+        return Err(mso_error("valueDigests must not be empty"));
+    }
+    let mut result = HashMap::with_capacity(namespaces.len());
+    for (namespace, values) in namespaces {
+        let namespace = as_text(namespace, "valueDigests namespace")?;
+        let values = as_map(values, "namespace digests")?;
+        if values.is_empty() {
+            return Err(mso_error("namespace digests must not be empty"));
         }
-    } else {
-        None
-    };
+        let mut digests = HashMap::with_capacity(values.len());
+        for (id, digest) in values {
+            let id = id
+                .as_integer()
+                .and_then(|id| u32::try_from(id).ok())
+                .filter(|id| *id < 1 << 31)
+                .ok_or_else(|| mso_error("digestID must be an unsigned integer below 2^31"))?;
+            let digest = digest
+                .as_bytes()
+                .ok_or_else(|| mso_error("digest value is not bytes"))?;
+            if digests.insert(id, digest.clone()).is_some() {
+                return Err(mso_error("duplicate digestID"));
+            }
+        }
+        if result.insert(namespace.to_owned(), digests).is_some() {
+            return Err(mso_error("duplicate valueDigests namespace"));
+        }
+    }
+    Ok(result)
+}
 
+fn parse_status(value: &Value) -> Result<MsoStatus, MdocError> {
+    let mechanisms = as_map(value, "status")?;
+    if mechanisms.is_empty() {
+        return Err(mso_error("status must contain at least one mechanism"));
+    }
+    let mut status_list = None;
+    for (mechanism, details) in mechanisms {
+        if as_text(mechanism, "status mechanism")? == "status_list" {
+            let mut idx = None;
+            let mut uri = None;
+            for (key, value) in as_map(details, "status.status_list")? {
+                let key = as_text(key, "status_list key")?;
+                match key {
+                    "idx" => {
+                        let index = value
+                            .as_integer()
+                            .and_then(|value| u64::try_from(value).ok())
+                            .ok_or_else(|| {
+                                mso_error("status.status_list.idx must be an unsigned integer")
+                            })?;
+                        set_once(&mut idx, index, "status.status_list.idx")?;
+                    }
+                    "uri" => {
+                        let value = as_text(value, "status.status_list.uri")?;
+                        iri_string::types::UriStr::new(value).map_err(|_| {
+                            mso_error("status.status_list.uri must be an RFC 3986 URI")
+                        })?;
+                        set_once(&mut uri, value.to_owned(), "status.status_list.uri")?;
+                    }
+                    _ => {} // Retained in `raw`; application policy decides.
+                }
+            }
+            set_once(
+                &mut status_list,
+                StatusListInfo {
+                    idx: required(idx, "status.status_list.idx")?,
+                    uri: required(uri, "status.status_list.uri")?,
+                },
+                "status.status_list",
+            )?;
+        }
+    }
     Ok(MsoStatus {
         status_list,
         raw: value.clone(),
     })
 }
 
-/// Parse ValidityInfo from a CBOR map.
-///
-/// Expected structure:
-/// ```text
-/// {
-///   "signed": tdate,      // Tag 0 (datetime string); Tag 1 (epoch) also accepted
-///   "validFrom": tdate,
-///   "validUntil": tdate,
-///   "expectedUpdate": tdate  // optional
-/// }
-/// ```
-fn parse_validity_info(value: &ciborium::Value) -> Result<ValidityInfo, MdocError> {
-    let map = value
-        .as_map()
-        .ok_or_else(|| MdocError::Mso("validityInfo is not a CBOR map".to_string()))?;
-
+fn parse_validity_info(value: &Value) -> Result<ValidityInfo, MdocError> {
     let mut signed = None;
     let mut valid_from = None;
     let mut valid_until = None;
     let mut expected_update = None;
-
-    for (k, v) in map {
-        let key = k
-            .as_text()
-            .ok_or_else(|| MdocError::Mso("validityInfo key is not text".to_string()))?;
-
-        match key {
-            "signed" => signed = Some(parse_datetime(v)?),
-            "validFrom" => valid_from = Some(parse_datetime(v)?),
-            "validUntil" => valid_until = Some(parse_datetime(v)?),
-            "expectedUpdate" => expected_update = Some(parse_datetime(v)?),
-            _ => {}
-        }
+    for (key, value) in as_map(value, "validityInfo")? {
+        let key = as_text(key, "validityInfo key")?;
+        let slot = match key {
+            "signed" => &mut signed,
+            "validFrom" => &mut valid_from,
+            "validUntil" => &mut valid_until,
+            "expectedUpdate" => &mut expected_update,
+            _ => return Err(mso_error("unsupported validityInfo member")),
+        };
+        set_once(slot, parse_datetime(value)?, key)?;
     }
-
-    Ok(ValidityInfo {
-        signed: signed.ok_or_else(|| MdocError::Mso("missing validityInfo.signed".to_string()))?,
-        valid_from: valid_from
-            .ok_or_else(|| MdocError::Mso("missing validityInfo.validFrom".to_string()))?,
-        valid_until: valid_until
-            .ok_or_else(|| MdocError::Mso("missing validityInfo.validUntil".to_string()))?,
+    let validity = ValidityInfo {
+        signed: required(signed, "validityInfo.signed")?,
+        valid_from: required(valid_from, "validityInfo.validFrom")?,
+        valid_until: required(valid_until, "validityInfo.validUntil")?,
         expected_update,
-    })
+    };
+    validity.validate()?;
+    Ok(validity)
 }
 
-/// Parse a CBOR datetime value.
-///
-/// ISO 18013-5 §9.1.2.4 mandates `tdate` (RFC 8949 Tag 0, an RFC 3339 string)
-/// for the validityInfo timestamps. We accept that form, and additionally the
-/// numeric epoch form (RFC 8949 **Tag 1**, seconds since 1970) for robustness.
-///
-/// Untagged plain-text datetimes are **rejected**: accepting them widened the
-/// input surface with no spec basis and masked malformed credentials
-/// (MEDIUM-3). Note: the previous implementation mislabeled the epoch tag as
-/// "Tag 6" — Tag 6 is not a datetime tag; the epoch-time tag is Tag 1.
-fn parse_datetime(value: &ciborium::Value) -> Result<chrono::DateTime<chrono::Utc>, MdocError> {
-    use chrono::{DateTime, TimeZone, Utc};
-
-    match value {
-        // Tag 0 (tdate): RFC 3339 datetime string — the spec-mandated form.
-        ciborium::Value::Tag(0, inner) => {
-            if let Some(s) = inner.as_text() {
-                DateTime::parse_from_rfc3339(s)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .map_err(|e| MdocError::Mso(format!("invalid datetime: {e}")))
-            } else {
-                Err(MdocError::Mso("Tag 0 inner is not text".to_string()))
-            }
-        }
-        // Tag 1: epoch-based datetime (integer seconds since 1970-01-01 UTC).
-        ciborium::Value::Tag(1, inner) => {
-            if let Some(i) = inner.as_integer() {
-                let secs: i64 = {
-                    let v: i128 = i.into();
-                    v
-                } as i64;
-                Utc.timestamp_opt(secs, 0)
-                    .single()
-                    .ok_or_else(|| MdocError::Mso("invalid epoch timestamp".to_string()))
-            } else {
-                Err(MdocError::Mso("Tag 1 inner is not integer".to_string()))
-            }
-        }
-        _ => Err(MdocError::Mso(format!(
-            "expected tdate (Tag 0) or epoch (Tag 1) datetime, got {:?}",
-            value
-        ))),
+fn parse_datetime(value: &Value) -> Result<chrono::DateTime<chrono::Utc>, MdocError> {
+    let Value::Tag(0, inner) = value else {
+        return Err(mso_error("MSO timestamps require tdate (Tag 0)"));
+    };
+    let text = as_text(inner, "tdate content")?;
+    if text.len() != 20 || !text.ends_with('Z') {
+        return Err(mso_error(
+            "MSO timestamps require whole UTC seconds with Z offset",
+        ));
     }
+    chrono::DateTime::parse_from_rfc3339(text)
+        .map(|value| value.with_timezone(&chrono::Utc))
+        .map_err(|_| mso_error("invalid MSO timestamp"))
 }
 
-/// Parse DeviceKeyInfo from a CBOR map.
-fn parse_device_key_info(value: &ciborium::Value) -> Result<DeviceKeyInfo, MdocError> {
-    use coset::{CborSerializable, CoseKey};
-
-    let map = value
-        .as_map()
-        .ok_or_else(|| MdocError::Mso("deviceKeyInfo is not a CBOR map".to_string()))?;
-
+fn parse_device_key_info(value: &Value) -> Result<DeviceKeyInfo, MdocError> {
     let mut device_key = None;
     let mut key_authorizations = None;
-
-    for (k, v) in map {
-        let key = k
-            .as_text()
-            .ok_or_else(|| MdocError::Mso("deviceKeyInfo key is not text".to_string()))?;
-
+    let mut key_info = None;
+    let mut additional_fields = HashMap::new();
+    for (key, value) in as_map(value, "deviceKeyInfo")? {
+        let key = as_text(key, "deviceKeyInfo key")?;
         match key {
             "deviceKey" => {
-                // deviceKey is a COSE_Key (CBOR map)
-                let mut key_bytes = Vec::new();
-                ciborium::into_writer(v, &mut key_bytes)
-                    .map_err(|e| MdocError::Mso(format!("encode deviceKey: {e}")))?;
-                let cose_key = CoseKey::from_slice(&key_bytes)
-                    .map_err(|e| MdocError::Mso(format!("parse deviceKey COSE_Key: {e}")))?;
-                device_key = Some(cose_key);
+                let key = CoseKey::from_cbor_value(value.clone())
+                    .map_err(|error| mso_error(format!("invalid device COSE_Key: {error}")))?;
+                set_once(&mut device_key, key, "deviceKey")?;
             }
-            "keyAuthorizations" => {
-                key_authorizations = Some(parse_key_authorizations(v)?);
+            "keyAuthorizations" => set_once(
+                &mut key_authorizations,
+                parse_key_authorizations(value)?,
+                key,
+            )?,
+            "keyInfo" => {
+                for (label, _) in as_map(value, "keyInfo")? {
+                    if label.as_integer().is_none() {
+                        return Err(mso_error("keyInfo labels must be integers"));
+                    }
+                }
+                set_once(&mut key_info, value.clone(), key)?;
             }
-            _ => {}
+            _ => {
+                if additional_fields
+                    .insert(key.to_owned(), value.clone())
+                    .is_some()
+                {
+                    return Err(mso_error("duplicate deviceKeyInfo extension"));
+                }
+            }
         }
     }
-
     Ok(DeviceKeyInfo {
-        device_key: device_key
-            .ok_or_else(|| MdocError::Mso("missing deviceKey in deviceKeyInfo".to_string()))?,
+        device_key: required(device_key, "deviceKeyInfo.deviceKey")?,
         key_authorizations,
+        key_info,
+        additional_fields,
     })
 }
 
-/// Parse KeyAuthorizations from a CBOR map.
-fn parse_key_authorizations(
-    value: &ciborium::Value,
-) -> Result<super::types::KeyAuthorizations, MdocError> {
-    let map = value
-        .as_map()
-        .ok_or_else(|| MdocError::Mso("keyAuthorizations is not a CBOR map".to_string()))?;
-
+fn parse_key_authorizations(value: &Value) -> Result<KeyAuthorizations, MdocError> {
     let mut name_spaces = None;
     let mut data_elements = None;
-
-    for (k, v) in map {
-        let key = k
-            .as_text()
-            .ok_or_else(|| MdocError::Mso("keyAuthorizations key is not text".to_string()))?;
-
+    let fields = as_map(value, "keyAuthorizations")?;
+    if fields.is_empty() {
+        return Err(mso_error("keyAuthorizations must not be empty"));
+    }
+    for (key, value) in fields {
+        let key = as_text(key, "keyAuthorizations key")?;
         match key {
-            "nameSpaces" => {
-                if let Some(arr) = v.as_array() {
-                    let ns: Vec<String> = arr
-                        .iter()
-                        .filter_map(|item| item.as_text().map(|s| s.to_string()))
-                        .collect();
-                    name_spaces = Some(ns);
-                }
-            }
+            "nameSpaces" => set_once(&mut name_spaces, parse_authorized_names(value)?, key)?,
             "dataElements" => {
-                if let Some(ns_map) = v.as_map() {
-                    let mut de = std::collections::HashMap::new();
-                    for (ns_key, ns_val) in ns_map {
-                        let ns = ns_key
-                            .as_text()
-                            .ok_or_else(|| MdocError::Mso("namespace key is not text".to_string()))?
-                            .to_string();
-                        if let Some(arr) = ns_val.as_array() {
-                            let elems: Vec<String> = arr
-                                .iter()
-                                .filter_map(|item| item.as_text().map(|s| s.to_string()))
-                                .collect();
-                            de.insert(ns, elems);
-                        }
-                    }
-                    data_elements = Some(de);
+                let namespaces = as_map(value, "authorized dataElements")?;
+                if namespaces.is_empty() {
+                    return Err(mso_error("authorized dataElements must not be empty"));
                 }
+                let mut elements = HashMap::with_capacity(namespaces.len());
+                for (namespace, names) in namespaces {
+                    let namespace = as_text(namespace, "authorized namespace")?;
+                    if elements
+                        .insert(namespace.to_owned(), parse_authorized_names(names)?)
+                        .is_some()
+                    {
+                        return Err(mso_error("duplicate authorized namespace"));
+                    }
+                }
+                set_once(&mut data_elements, elements, key)?;
             }
-            _ => {}
+            _ => return Err(mso_error("unsupported keyAuthorizations member")),
         }
     }
-
-    Ok(super::types::KeyAuthorizations {
+    if let (Some(namespaces), Some(elements)) = (&name_spaces, &data_elements)
+        && namespaces
+            .iter()
+            .any(|namespace| elements.contains_key(namespace))
+    {
+        return Err(mso_error(
+            "keyAuthorizations namespace appears in both authorization forms",
+        ));
+    }
+    Ok(KeyAuthorizations {
         name_spaces,
         data_elements,
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_datetime, parse_status};
-
-    #[test]
-    fn status_list_is_parsed() {
-        // status = { status_list: { idx: 42, uri: "https://issuer/statuslist/1" } }
-        let v = ciborium::Value::Map(vec![(
-            ciborium::Value::Text("status_list".into()),
-            ciborium::Value::Map(vec![
-                (
-                    ciborium::Value::Text("idx".into()),
-                    ciborium::Value::Integer(42u8.into()),
-                ),
-                (
-                    ciborium::Value::Text("uri".into()),
-                    ciborium::Value::Text("https://issuer/statuslist/1".into()),
-                ),
-            ]),
-        )]);
-        let status = parse_status(&v).expect("status_list parsed");
-        let sl = status.status_list.expect("status_list parsed");
-        assert_eq!(sl.idx, 42);
-        assert_eq!(sl.uri, "https://issuer/statuslist/1");
-    }
-
-    #[test]
-    fn unknown_status_shape_is_preserved_raw() {
-        // A non-status_list shape still round-trips via `raw`.
-        let v = ciborium::Value::Map(vec![(
-            ciborium::Value::Text("identifier_list".into()),
-            ciborium::Value::Integer(7u8.into()),
-        )]);
-        let status = parse_status(&v).expect("unknown shape preserved");
-        assert!(status.status_list.is_none());
-        assert_eq!(status.raw, v);
-    }
-
-    #[test]
-    fn malformed_status_list_is_rejected() {
-        let v = ciborium::Value::Map(vec![(
-            ciborium::Value::Text("status_list".into()),
-            ciborium::Value::Map(vec![
-                (
-                    ciborium::Value::Text("idx".into()),
-                    ciborium::Value::Text("not-an-integer".into()),
-                ),
-                (
-                    ciborium::Value::Text("uri".into()),
-                    ciborium::Value::Text("https://issuer/statuslist/1".into()),
-                ),
-            ]),
-        )]);
-
-        assert!(parse_status(&v).is_err());
-    }
-
-    #[test]
-    fn tag0_tdate_is_accepted() {
-        let v = ciborium::Value::Tag(
-            0,
-            Box::new(ciborium::Value::Text("2026-05-31T12:00:00Z".into())),
-        );
-        assert!(parse_datetime(&v).is_ok());
-    }
-
-    #[test]
-    fn tag1_epoch_is_accepted() {
-        let v = ciborium::Value::Tag(
-            1,
-            Box::new(ciborium::Value::Integer(1_780_000_000i64.into())),
-        );
-        assert!(parse_datetime(&v).is_ok());
-    }
-
-    #[test]
-    fn untagged_text_is_rejected() {
-        // MEDIUM-3: a plain (untagged) datetime string is no longer accepted.
-        let v = ciborium::Value::Text("2026-05-31T12:00:00Z".into());
-        assert!(parse_datetime(&v).is_err());
-    }
-
-    #[test]
-    fn tag6_is_not_a_datetime() {
-        // The old code mislabeled the epoch tag as "Tag 6"; Tag 6 must be rejected.
-        let v = ciborium::Value::Tag(6, Box::new(ciborium::Value::Integer(0i64.into())));
-        assert!(parse_datetime(&v).is_err());
-    }
+fn parse_authorized_names(value: &Value) -> Result<Vec<String>, MdocError> {
+    let values = value
+        .as_array()
+        .filter(|values| !values.is_empty())
+        .ok_or_else(|| mso_error("authorization list must be a nonempty array"))?;
+    values
+        .iter()
+        .map(|value| as_text(value, "authorized name").map(str::to_owned))
+        .collect()
 }

@@ -33,8 +33,8 @@ pub struct DeviceSigned {
     pub device_auth: DeviceAuth,
     /// Device-provided attributes: namespace → (element → value).
     pub name_spaces: HashMap<String, HashMap<String, ciborium::Value>>,
-    /// The exact inner bytes of `DeviceNameSpaces` (the content of the
-    /// `DeviceNameSpacesBytes = #6.24(bstr .cbor DeviceNameSpaces)` field).
+    /// The exact, complete `DeviceNameSpacesBytes = #6.24(bstr .cbor DeviceNameSpaces)`
+    /// field, including its Tag 24 and byte-string header.
     ///
     /// These must be preserved verbatim so device authentication can be
     /// verified over the canonical `DeviceAuthentication` structure

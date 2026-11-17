@@ -1,13 +1,9 @@
-# NazoAuth dependency patch
+# NazoAuth integration
 
-This branch builds on c5d460cfd667324e51e590e8ecbbdb21f63bbdbe and retains the
-COSE 0.4 and borrowed-transcript contracts. It upgrades RustCrypto curves to
-remove the production dependency on crypto-bigint 0.5.5 (RUSTSEC-2026-0387).
+The maintained package is now `nazo-mdoc`. Its production migration baseline,
+immutable dependency pinning, removed legacy features and host security
+responsibilities are documented in [docs/migration.md](docs/migration.md).
 
-The default `tsp` feature still pulls `tsp-ltv` and its vulnerable
-crypto-bigint 0.5.5 dependency. NazoAuth disables default features and enables
-only `issue`; this patch does not claim to repair the TSP dependency chain.
-
-TODO: retire this branch when a maintained release both uses a non-yanked,
-patched crypto-bigint and preserves the COSE and borrowed-transcript contracts,
-as verified by NazoAuth's credential tests.
+The legacy `nazoauth/patched-rustcrypto` revision
+`9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc` remains available for old consumers.
+The old TSP dependency is not part of the new package's feature graph.

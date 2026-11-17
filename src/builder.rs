@@ -1,6 +1,7 @@
 //! Document builder for mdoc issuance (feature: `issue`).
 
-use coset::{iana, CborSerializable};
+use coset::{AsCborValue, iana};
+use der::Decode;
 use std::collections::{HashMap, HashSet};
 
 use crate::cbor::data_item;
@@ -8,19 +9,7 @@ use crate::error::MdocError;
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
 use crate::model::issuer_auth::IssuerAuth;
 use crate::model::issuer_signed_item::IssuerSignedItem;
-use crate::model::types::{DigestAlgorithm, ValidityInfo};
-
-/// Trait for COSE signing operations.
-pub trait CoseSigner: Send + Sync {
-    /// Sign the to-be-signed data and return the signature bytes.
-    fn sign(&self, tbs: &[u8]) -> Result<Vec<u8>, MdocError>;
-
-    /// The COSE algorithm identifier (e.g., -7 for ES256).
-    fn algorithm(&self) -> i64;
-
-    /// The issuer certificate (DER-encoded X.509).
-    fn certificate_der(&self) -> &[u8];
-}
+use crate::model::types::{CoseAlgorithm, DigestAlgorithm, ValidityInfo};
 
 /// Builder for creating issuer-signed mdoc documents.
 pub struct DocumentBuilder {
@@ -30,84 +19,36 @@ pub struct DocumentBuilder {
     validity_info: Option<ValidityInfo>,
     digest_algorithm: DigestAlgorithm,
     status: Option<ciborium::Value>,
-    auto_tag: bool,
 }
 
-/// Default CBOR tag for a well-known mdoc / EUDIW PID data element.
-///
-/// ISO 18013-5 and the EUDIW PID rule book require certain date-valued elements
-/// to be wrapped in a CBOR tag *inside* `elementValue` (so the tag is covered by
-/// the issuer digest). Getting this wrong silently produces a non-interoperable
-/// credential, so [`DocumentBuilder`] applies these tags automatically unless
-/// the caller already tagged the value or disabled auto-tagging.
-///
-/// Mirrors `pyMDOC-CBOR`'s `CBORTAGS_ATTR_MAP`:
-/// - `birth_date`, `expiry_date`, `issue_date`, `issuance_date` -> Tag 1004 (full-date)
-/// - `effective_from_date` -> Tag 0 (tdate)
-pub fn default_element_tag(element_id: &str) -> Option<u64> {
-    match element_id {
-        "birth_date" | "expiry_date" | "issue_date" | "issuance_date" => {
-            Some(crate::cbor::date::TAG_FULL_DATE)
+/// A prepared COSE signature operation. No private key enters this type.
+pub struct PreparedDocument {
+    document: IssuerSignedDocument,
+    signing_input: Vec<u8>,
+    issuer_key: coset::CoseKey,
+    algorithm: i64,
+}
+
+impl PreparedDocument {
+    /// Exact COSE Sig_structure bytes to sign with the selected algorithm.
+    pub fn signing_input(&self) -> &[u8] {
+        &self.signing_input
+    }
+
+    /// Attach the external signature after checking it against the leaf key.
+    pub fn finish(mut self, signature: Vec<u8>) -> Result<IssuerSignedDocument, MdocError> {
+        if !crate::cose::verify_cose_signature(
+            &self.signing_input,
+            &signature,
+            &self.issuer_key,
+            self.algorithm,
+        )? {
+            return Err(MdocError::Signature(
+                "external issuer signature does not match signing input/certificate".into(),
+            ));
         }
-        "effective_from_date" => Some(0),
-        _ => None,
-    }
-}
-
-/// Apply the default tag for `element_id` to `value`.
-///
-/// Only explicitly-known composite elements recurse into nested members. This
-/// avoids silently rewriting arbitrary extension payloads that happen to use a
-/// familiar field name like `issue_date`.
-fn auto_tag_value(element_id: &str, value: ciborium::Value) -> ciborium::Value {
-    if matches!(value, ciborium::Value::Tag(..)) {
-        return value;
-    }
-    if let Some(tag) = default_element_tag(element_id) {
-        return ciborium::Value::Tag(tag, Box::new(value));
-    }
-
-    if element_id != "driving_privileges" {
-        return value;
-    }
-
-    match value {
-        ciborium::Value::Array(items) => {
-            ciborium::Value::Array(items.into_iter().map(auto_tag_driving_privilege).collect())
-        }
-        other => other,
-    }
-}
-
-fn auto_tag_driving_privilege(value: ciborium::Value) -> ciborium::Value {
-    match value {
-        ciborium::Value::Map(entries) => ciborium::Value::Map(
-            entries
-                .into_iter()
-                .map(|(k, v)| match &k {
-                    ciborium::Value::Text(key) => {
-                        let key = key.clone();
-                        (k, auto_tag_value(&key, v))
-                    }
-                    _ => (k, v),
-                })
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
-/// Draw a fresh random `digestID` not already in `used`, inserting it before
-/// returning. ISO 18013-5 recommends random (non-sequential) digest IDs to
-/// prevent cross-presentation correlation (#7).
-fn next_random_digest_id(used: &mut HashSet<u32>) -> u32 {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    loop {
-        let candidate: u32 = rng.gen();
-        if used.insert(candidate) {
-            return candidate;
-        }
+        self.document.issuer_signed.issuer_auth.cose_sign1.signature = signature;
+        Ok(self.document)
     }
 }
 
@@ -121,7 +62,6 @@ impl DocumentBuilder {
             validity_info: None,
             digest_algorithm: DigestAlgorithm::Sha256,
             status: None,
-            auto_tag: true,
         }
     }
 
@@ -160,14 +100,6 @@ impl DocumentBuilder {
         self
     }
 
-    /// Enable or disable automatic CBOR tagging of well-known data elements
-    /// (see [`default_element_tag`]). Enabled by default. Disable it when the
-    /// caller takes full responsibility for wrapping values in the correct tags.
-    pub fn auto_tag(mut self, enabled: bool) -> Self {
-        self.auto_tag = enabled;
-        self
-    }
-
     /// Set the MSO `status` element to an IETF Token Status List reference
     /// (`status_list: { idx, uri }`). Embedded into the signed MSO so verifiers
     /// can look up revocation state.
@@ -196,37 +128,88 @@ impl DocumentBuilder {
         self
     }
 
-    /// Build and sign the document.
+    /// Prepare an external signing operation without taking custody of a key.
     ///
     /// 1. Generate IssuerSignedItems with random salts for each attribute
     /// 2. Compute digests for each item
     /// 3. Build the MSO with valueDigests
-    /// 4. Wrap MSO in COSE_Sign1 using the provided signer
-    /// 5. Return the IssuerSignedDocument
-    pub fn sign(self, signer: &dyn CoseSigner) -> Result<IssuerSignedDocument, MdocError> {
-        let validity = self
+    /// 4. Return the exact COSE Sig_structure for an external signer
+    /// 5. Complete with [`PreparedDocument::finish`], which verifies the result
+    ///
+    /// Input clock timestamps may have subsecond precision. Ordering is checked
+    /// before normalizing them to the whole UTC seconds required by ISO mdoc;
+    /// an interval that becomes empty after normalization is rejected.
+    pub fn prepare(
+        self,
+        algorithm: CoseAlgorithm,
+        certificate_chain: Vec<Vec<u8>>,
+    ) -> Result<PreparedDocument, MdocError> {
+        let mut validity = self
             .validity_info
             .ok_or_else(|| MdocError::Issuance("missing validity info".to_string()))?;
+        if validity.signed > validity.valid_from || validity.valid_from >= validity.valid_until {
+            return Err(MdocError::Validity(
+                "MSO validity must satisfy signed <= validFrom < validUntil before normalization"
+                    .into(),
+            ));
+        }
+        use chrono::Timelike;
+        let whole_seconds = |time: chrono::DateTime<chrono::Utc>| {
+            // Preserve Chrono's representation of a whole leap second.
+            time.with_nanosecond(time.nanosecond() / 1_000_000_000 * 1_000_000_000)
+                .expect("normalizing an existing timestamp preserves its range")
+        };
+        validity.signed = whole_seconds(validity.signed);
+        validity.valid_from = whole_seconds(validity.valid_from);
+        validity.valid_until = whole_seconds(validity.valid_until);
+        validity.expected_update = validity.expected_update.map(whole_seconds);
+        validity.validate()?;
 
         let mut name_spaces: HashMap<String, Vec<IssuerSignedItem>> = HashMap::new();
         let mut value_digests: HashMap<String, HashMap<u32, Vec<u8>>> = HashMap::new();
+        if self.doc_type.is_empty() || self.name_spaces.is_empty() {
+            return Err(MdocError::Issuance(
+                "docType and at least one namespace are required".into(),
+            ));
+        }
+        let device_key = self
+            .device_key
+            .as_ref()
+            .ok_or_else(|| MdocError::Issuance("device public key is required".into()))?;
+        crate::cose::key::validate_device_public_key(device_key)?;
+        if certificate_chain.is_empty() || certificate_chain.iter().any(Vec::is_empty) {
+            return Err(MdocError::Issuance("nonempty x5chain is required".into()));
+        }
+        let leaf = x509_cert::Certificate::from_der(&certificate_chain[0])
+            .map_err(|e| MdocError::Certificate(e.to_string()))?;
+        let issuer_key =
+            crate::cose::key::cose_key_from_spki(&leaf.tbs_certificate.subject_public_key_info)?;
+        crate::cose::validate_verification_key(&issuer_key, algorithm.cose_id())?;
+        let interval = crate::verifier::certificate_interval(&leaf)?;
+        if validity.signed < interval.0 || validity.signed > interval.1 {
+            return Err(MdocError::Validity(
+                "MSO signed time outside issuer certificate validity".into(),
+            ));
+        }
         let mut used_digest_ids = HashSet::new();
+        let mut used_randoms = HashSet::new();
 
         for (namespace, attributes) in &self.name_spaces {
-            let mut items = Vec::new();
+            if namespace.is_empty() || attributes.is_empty() {
+                return Err(MdocError::Issuance("empty namespace".into()));
+            }
+            let mut identifiers = HashSet::new();
+            let mut items = Vec::with_capacity(attributes.len());
             let mut ns_digests = HashMap::new();
 
             for (elem_id, elem_value) in attributes {
-                let digest_id = next_random_digest_id(&mut used_digest_ids);
-
-                let elem_value = if self.auto_tag {
-                    auto_tag_value(elem_id, elem_value.clone())
-                } else {
-                    elem_value.clone()
-                };
-
-                let mut random = vec![0u8; 32];
-                rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut random);
+                if elem_id.is_empty() || !identifiers.insert(elem_id) {
+                    return Err(MdocError::Issuance(
+                        "empty or duplicate elementIdentifier".into(),
+                    ));
+                }
+                let (digest_id, random) =
+                    fresh_item_randomness(&mut used_digest_ids, &mut used_randoms)?;
 
                 let item_map = ciborium::Value::Map(vec![
                     (
@@ -247,7 +230,8 @@ impl DocumentBuilder {
                     ),
                 ]);
 
-                let encoded = data_item::encode_cbor_canonical(&item_map)?;
+                let inner = data_item::encode_cbor_canonical(&item_map)?;
+                let encoded = crate::cbor::raw::wrap_tag24_bytes(&inner);
 
                 let item = IssuerSignedItem {
                     digest_id,
@@ -272,50 +256,56 @@ impl DocumentBuilder {
             &self.digest_algorithm,
             &validity,
             &value_digests,
-            self.device_key.as_ref(),
+            Some(device_key),
             self.status.as_ref(),
         )?;
 
+        // Validate semantic fields once before handing bytes to an external signer.
+        crate::model::issuer_auth::parse_mso_value(&mso_map)?;
         let mso_inner = data_item::encode_cbor_canonical(&mso_map)?;
-        let mso_bytes = data_item::encode_cbor_canonical(&data_item::wrap_tag24(&mso_inner))?;
-
-        let alg = match signer.algorithm() {
-            -7 => iana::Algorithm::ES256,
-            -35 => iana::Algorithm::ES384,
-            -36 => iana::Algorithm::ES512,
-            -8 => iana::Algorithm::EdDSA,
-            other => {
-                return Err(MdocError::Issuance(format!(
-                    "unsupported COSE algorithm: {other}"
-                )))
-            }
+        let mso_bytes = crate::cbor::raw::wrap_tag24_bytes(&mso_inner);
+        crate::cbor::raw::validate(&mso_bytes)?;
+        let alg = match algorithm {
+            CoseAlgorithm::ES256 => iana::Algorithm::ES256,
+            CoseAlgorithm::ES384 => iana::Algorithm::ES384,
+            CoseAlgorithm::ES512 => iana::Algorithm::ES512,
+            CoseAlgorithm::EdDSA => iana::Algorithm::EdDSA,
         };
-
-        let protected = coset::HeaderBuilder::new().algorithm(alg).build();
-
-        let cert_der = signer.certificate_der().to_vec();
         let mut unprotected = coset::Header::default();
-        unprotected
-            .rest
-            .push((coset::Label::Int(33), ciborium::Value::Bytes(cert_der)));
-
+        let chain = if certificate_chain.len() == 1 {
+            ciborium::Value::Bytes(
+                certificate_chain
+                    .into_iter()
+                    .next()
+                    .expect("nonempty chain"),
+            )
+        } else {
+            ciborium::Value::Array(
+                certificate_chain
+                    .into_iter()
+                    .map(ciborium::Value::Bytes)
+                    .collect(),
+            )
+        };
+        unprotected.rest.push((coset::Label::Int(33), chain));
         let cose_sign1 = coset::CoseSign1Builder::new()
-            .protected(protected)
+            .protected(coset::HeaderBuilder::new().algorithm(alg).build())
             .unprotected(unprotected)
             .payload(mso_bytes)
-            .try_create_signature(&[], |tbs| signer.sign(tbs))
-            .map_err(|e| MdocError::Issuance(format!("COSE_Sign1 signing: {e}")))?
             .build();
-
-        let issuer_auth = IssuerAuth::new(cose_sign1);
-
-        Ok(IssuerSignedDocument {
-            doc_type: self.doc_type,
-            issuer_signed: IssuerSigned {
-                issuer_auth,
-                name_spaces,
+        let signing_input = cose_sign1.tbs_data(&[]);
+        Ok(PreparedDocument {
+            document: IssuerSignedDocument {
+                doc_type: self.doc_type,
+                issuer_signed: IssuerSigned {
+                    issuer_auth: IssuerAuth::new(cose_sign1),
+                    name_spaces,
+                },
+                device_signed: None,
             },
-            device_signed: None,
+            signing_input,
+            issuer_key,
+            algorithm: algorithm.cose_id(),
         })
     }
 }
@@ -344,7 +334,7 @@ fn build_mso_cbor(
         ));
     }
 
-    let validity_map = ciborium::Value::Map(vec![
+    let mut validity_entries = vec![
         (
             ciborium::Value::Text("signed".to_string()),
             tdate(&validity.signed),
@@ -357,7 +347,14 @@ fn build_mso_cbor(
             ciborium::Value::Text("validUntil".to_string()),
             tdate(&validity.valid_until),
         ),
-    ]);
+    ];
+    if let Some(update) = validity.expected_update {
+        validity_entries.push((
+            ciborium::Value::Text("expectedUpdate".into()),
+            tdate(&update),
+        ));
+    }
+    let validity_map = ciborium::Value::Map(validity_entries);
 
     let mut mso_entries = vec![
         (
@@ -383,12 +380,7 @@ fn build_mso_cbor(
     ];
 
     if let Some(key) = device_key {
-        let key_bytes = key
-            .clone()
-            .to_vec()
-            .map_err(|e| MdocError::Issuance(format!("encode COSE_Key: {e}")))?;
-        let key_value: ciborium::Value = ciborium::from_reader(key_bytes.as_slice())
-            .map_err(|e| MdocError::Issuance(format!("re-decode COSE_Key: {e}")))?;
+        let key_value = key.clone().to_cbor_value()?;
 
         let device_key_info = ciborium::Value::Map(vec![(
             ciborium::Value::Text("deviceKey".to_string()),
@@ -408,13 +400,33 @@ fn build_mso_cbor(
     Ok(ciborium::Value::Map(mso_entries))
 }
 
+fn fresh_item_randomness(
+    ids: &mut HashSet<u32>,
+    salts: &mut HashSet<Vec<u8>>,
+) -> Result<(u32, Vec<u8>), MdocError> {
+    for _ in 0..32 {
+        let mut entropy = [0u8; 36];
+        getrandom::fill(&mut entropy)
+            .map_err(|e| MdocError::Issuance(format!("OS entropy: {e}")))?;
+        let id = u32::from_be_bytes(entropy[..4].try_into().expect("four bytes")) & 0x7fff_ffff;
+        let salt = entropy[4..].to_vec();
+        if !ids.contains(&id) && !salts.contains(&salt) {
+            ids.insert(id);
+            salts.insert(salt.clone());
+            return Ok((id, salt));
+        }
+    }
+    Err(MdocError::Issuance(
+        "entropy collision limit exceeded".into(),
+    ))
+}
+
 fn tdate(value: &chrono::DateTime<chrono::Utc>) -> ciborium::Value {
     ciborium::Value::Tag(
         0,
-        Box::new(ciborium::Value::Text(value.to_rfc3339_opts(
-            chrono::SecondsFormat::Secs,
-            true,
-        ))),
+        Box::new(ciborium::Value::Text(
+            value.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        )),
     )
 }
 
@@ -437,102 +449,15 @@ mod tests {
     }
 
     #[test]
-    fn well_known_dates_get_default_tags() {
-        assert_eq!(default_element_tag("birth_date"), Some(1004));
-        assert_eq!(default_element_tag("issue_date"), Some(1004));
-        assert_eq!(default_element_tag("expiry_date"), Some(1004));
-        assert_eq!(default_element_tag("issuance_date"), Some(1004));
-        assert_eq!(default_element_tag("effective_from_date"), Some(0));
-        assert_eq!(default_element_tag("family_name"), None);
-    }
-
-    #[test]
-    fn auto_tag_wraps_date_values() {
-        let v = auto_tag_value("birth_date", ciborium::Value::Text("1990-01-15".into()));
-        match v {
-            ciborium::Value::Tag(1004, inner) => {
-                assert_eq!(*inner, ciborium::Value::Text("1990-01-15".into()))
-            }
-            other => panic!("expected Tag 1004, got {other:?}"),
+    fn random_digest_ids_are_unique_and_31_bit() {
+        let mut ids = HashSet::new();
+        let mut randoms = HashSet::new();
+        for _ in 0..1000 {
+            let (id, salt) = fresh_item_randomness(&mut ids, &mut randoms).unwrap();
+            assert!(id < 1 << 31);
+            assert_eq!(salt.len(), 32);
         }
-    }
-
-    #[test]
-    fn auto_tag_respects_existing_tag() {
-        let pre = ciborium::Value::Tag(0, Box::new(ciborium::Value::Text("x".into())));
-        assert_eq!(auto_tag_value("birth_date", pre.clone()), pre);
-    }
-
-    #[test]
-    fn auto_tag_leaves_plain_values_untouched() {
-        let v = ciborium::Value::Text("Doe".into());
-        assert_eq!(auto_tag_value("family_name", v.clone()), v);
-    }
-
-    #[test]
-    fn auto_tag_recurses_into_driving_privileges() {
-        let priv_entry = ciborium::Value::Map(vec![
-            (
-                ciborium::Value::Text("vehicle_category_code".into()),
-                ciborium::Value::Text("A".into()),
-            ),
-            (
-                ciborium::Value::Text("issue_date".into()),
-                ciborium::Value::Text("2018-08-09".into()),
-            ),
-            (
-                ciborium::Value::Text("expiry_date".into()),
-                ciborium::Value::Text("2024-10-20".into()),
-            ),
-        ]);
-        let tagged = auto_tag_value(
-            "driving_privileges",
-            ciborium::Value::Array(vec![priv_entry]),
-        );
-        let arr = tagged.as_array().unwrap();
-        let map = arr[0].as_map().unwrap();
-        for (k, v) in map {
-            match k.as_text().unwrap() {
-                "issue_date" | "expiry_date" => {
-                    assert!(
-                        matches!(v, ciborium::Value::Tag(1004, _)),
-                        "date should be tagged"
-                    );
-                }
-                "vehicle_category_code" => {
-                    assert!(matches!(v, ciborium::Value::Text(_)), "code stays untagged");
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    #[test]
-    fn auto_tag_does_not_rewrite_unknown_nested_payloads() {
-        let payload = ciborium::Value::Map(vec![
-            (
-                ciborium::Value::Text("issue_date".into()),
-                ciborium::Value::Text("2024-10-20".into()),
-            ),
-            (
-                ciborium::Value::Text("meta".into()),
-                ciborium::Value::Map(vec![(
-                    ciborium::Value::Text("expiry_date".into()),
-                    ciborium::Value::Text("2025-10-20".into()),
-                )]),
-            ),
-        ]);
-
-        assert_eq!(auto_tag_value("custom_extension", payload.clone()), payload);
-    }
-
-    #[test]
-    fn random_digest_ids_are_unique() {
-        let mut used = HashSet::new();
-        let ids: Vec<u32> = (0..1000)
-            .map(|_| next_random_digest_id(&mut used))
-            .collect();
-        let distinct: HashSet<u32> = ids.iter().copied().collect();
-        assert_eq!(distinct.len(), ids.len(), "all digestIDs must be unique");
+        assert_eq!(ids.len(), 1000);
+        assert_eq!(randoms.len(), 1000);
     }
 }

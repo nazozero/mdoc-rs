@@ -6,6 +6,45 @@
 use crate::error::MdocError;
 use coset::iana;
 
+/// Validate a supported signature-only device public key before issuing it.
+/// Private coordinates and unsupported algorithms must never enter an MSO.
+/// Point validation is delegated to the same RustCrypto implementations used
+/// for signature verification, not reimplemented here.
+pub(crate) fn validate_device_public_key(key: &coset::CoseKey) -> Result<(), MdocError> {
+    let alg = match (key.kty.clone(), key.curve()?) {
+        (coset::KeyType::Assigned(iana::KeyType::EC2), 1) => -7,
+        (coset::KeyType::Assigned(iana::KeyType::EC2), 2) => -35,
+        (coset::KeyType::Assigned(iana::KeyType::EC2), 3) => -36,
+        (coset::KeyType::Assigned(iana::KeyType::OKP), 6) => -8,
+        _ => return Err(MdocError::Cose("unsupported device public key".into())),
+    };
+    crate::cose::validate_verification_key(key, alg)?;
+    let bytes = key.public_key_bytes()?;
+    let invalid = || MdocError::Cose("invalid device public point".into());
+    match alg {
+        -7 => {
+            p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).map_err(|_| invalid())?;
+        }
+        -35 => {
+            p384::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).map_err(|_| invalid())?;
+        }
+        -36 => {
+            p521::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).map_err(|_| invalid())?;
+        }
+        -8 => {
+            let public = ed25519_dalek::VerifyingKey::from_bytes(
+                bytes.as_slice().try_into().map_err(|_| invalid())?,
+            )
+            .map_err(|_| invalid())?;
+            if public.is_weak() {
+                return Err(invalid());
+            }
+        }
+        _ => unreachable!("validated supported algorithm"),
+    }
+    Ok(())
+}
+
 /// Extension trait for `coset::CoseKey` with mdoc-specific operations.
 pub trait CoseKeyExt {
     /// Extract the raw public key bytes (uncompressed point for EC2, or raw for OKP).
@@ -30,14 +69,14 @@ impl CoseKeyExt for coset::CoseKey {
                 // Uncompressed point: 0x04 || x || y
                 let mut bytes = Vec::with_capacity(1 + x.len() + y.len());
                 bytes.push(0x04);
-                bytes.extend_from_slice(&x);
-                bytes.extend_from_slice(&y);
+                bytes.extend_from_slice(x);
+                bytes.extend_from_slice(y);
                 Ok(bytes)
             }
             coset::KeyType::Assigned(iana::KeyType::OKP) => {
                 // OKP key: extract x coordinate (raw public key)
                 let x = get_param(&self.params, iana::OkpKeyParameter::X as i64)?;
-                Ok(x)
+                Ok(x.to_vec())
             }
             _ => Err(MdocError::Cose(format!("unsupported key type: {:?}", kty))),
         }
@@ -57,23 +96,22 @@ impl CoseKeyExt for coset::CoseKey {
             coset::KeyType::Assigned(iana::KeyType::EC2) => {
                 // Look for crv parameter (label -1)
                 for (label, value) in &self.params {
-                    if let coset::Label::Int(-1) = label {
-                        if let ciborium::Value::Integer(crv) = value {
-                            return Ok({
-                                let v: i128 = (*crv).into();
-                                v
-                            } as i64);
-                        }
+                    if let coset::Label::Int(-1) = label
+                        && let ciborium::Value::Integer(crv) = value
+                    {
+                        return i64::try_from(i128::from(*crv))
+                            .map_err(|_| MdocError::Cose("curve out of range".into()));
                     }
                 }
                 Err(MdocError::Cose("missing curve in EC2 key".to_string()))
             }
             coset::KeyType::Assigned(iana::KeyType::OKP) => {
                 for (label, value) in &self.params {
-                    if let coset::Label::Int(-1) = label {
-                        if let ciborium::Value::Integer(crv) = value {
-                            return Ok(i128::from(*crv) as i64);
-                        }
+                    if let coset::Label::Int(-1) = label
+                        && let ciborium::Value::Integer(crv) = value
+                    {
+                        return i64::try_from(i128::from(*crv))
+                            .map_err(|_| MdocError::Cose("curve out of range".into()));
                     }
                 }
                 Err(MdocError::Cose("missing curve in OKP key".to_string()))
@@ -84,14 +122,13 @@ impl CoseKeyExt for coset::CoseKey {
 }
 
 /// Extract a byte-string parameter from COSE key params by label.
-fn get_param(params: &[(coset::Label, ciborium::Value)], label: i64) -> Result<Vec<u8>, MdocError> {
+fn get_param(params: &[(coset::Label, ciborium::Value)], label: i64) -> Result<&[u8], MdocError> {
     for (l, v) in params {
-        if let coset::Label::Int(n) = l {
-            if *n == label {
-                if let ciborium::Value::Bytes(b) = v {
-                    return Ok(b.clone());
-                }
-            }
+        if let coset::Label::Int(n) = l
+            && *n == label
+            && let ciborium::Value::Bytes(b) = v
+        {
+            return Ok(b);
         }
     }
     Err(MdocError::Cose(format!(
@@ -127,7 +164,7 @@ pub fn cose_key_from_sec1_bytes(curve_id: i64, point: &[u8]) -> Result<coset::Co
         other => {
             return Err(MdocError::Cose(format!(
                 "unsupported curve id {other} (expected P-256/384/521)"
-            )))
+            )));
         }
     };
 
@@ -148,13 +185,39 @@ pub fn cose_key_from_sec1_bytes(curve_id: i64, point: &[u8]) -> Result<coset::Co
 /// (the `-----BEGIN PUBLIC KEY-----` form), mapping the named curve
 /// (P-256/384/521) to the COSE `crv` (improvement #9).
 pub fn cose_key_from_pem(pem: &str) -> Result<coset::CoseKey, MdocError> {
-    use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
     use der::DecodePem;
     use x509_cert::spki::SubjectPublicKeyInfoOwned;
 
     let spki = SubjectPublicKeyInfoOwned::from_pem(pem.as_bytes())
         .map_err(|e| MdocError::Cose(format!("parse SubjectPublicKeyInfo PEM: {e}")))?;
 
+    cose_key_from_spki(&spki)
+}
+
+/// Convert an X.509 public key using its authenticated algorithm and curve OIDs.
+/// This does not establish certificate trust.
+pub fn cose_key_from_spki(
+    spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
+) -> Result<coset::CoseKey, MdocError> {
+    use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
+    if spki.algorithm.oid.to_string() == "1.3.101.112" {
+        if spki.algorithm.parameters.is_some() {
+            return Err(MdocError::Cose(
+                "Ed25519 SPKI parameters must be absent".into(),
+            ));
+        }
+        let bytes = spki
+            .subject_public_key
+            .as_bytes()
+            .ok_or_else(|| MdocError::Cose("unaligned SPKI".into()))?;
+        if bytes.len() != 32 {
+            return Err(MdocError::Cose("invalid Ed25519 SPKI length".into()));
+        }
+        return Ok(coset::CoseKeyBuilder::new_okp_key()
+            .param(-1, ciborium::Value::Integer(6.into()))
+            .param(-2, ciborium::Value::Bytes(bytes.to_vec()))
+            .build());
+    }
     if spki.algorithm.oid != ID_EC_PUBLIC_KEY {
         return Err(MdocError::Cose(format!(
             "not an EC public key (algorithm OID {})",

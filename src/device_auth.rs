@@ -2,12 +2,14 @@
 
 use crate::error::MdocError;
 use crate::model::types::DeviceAuth;
-use coset::CborSerializable;
 
-/// Result of device authentication verification.
+/// Result of a cryptographic comparison against caller-supplied payload bytes.
+///
+/// This primitive result does not authenticate an MSO or issuer, validate the
+/// payload's DeviceAuthentication schema, or establish request context or trust.
 #[derive(Clone, Debug)]
 pub struct DeviceAuthResult {
-    /// Whether the device authentication is valid.
+    /// Whether the signature or MAC matches the supplied bytes and key.
     pub is_valid: bool,
     /// Algorithm used.
     pub algorithm: String,
@@ -15,22 +17,28 @@ pub struct DeviceAuthResult {
     pub reasons: Vec<String>,
 }
 
-/// Verify device authentication.
+/// Check the cryptographic signature or MAC over the supplied detached payload.
 ///
-/// For `DeviceAuth::Signature`, verifies the COSE_Sign1 over `DeviceAuthentication`
-/// using the device public key from the MSO.
+/// The intended payload is the complete `DeviceAuthenticationBytes` (Tag 24 and
+/// byte-string envelope included), constructed for the authenticated request
+/// context. This low-level operation accepts those bytes as given; it does not
+/// validate their schema or prove their provenance. Prefer
+/// [`crate::verify_presentation`] for wire presentations and authenticated claims.
 ///
-/// For `DeviceAuth::Mac`, derives the ephemeral MAC key via ECDH+HKDF and
-/// verifies the COSE_Mac0.
+/// For `DeviceAuth::Signature`, checks the COSE_Sign1 using the supplied device
+/// public key. Authenticating that key in an issuer-signed MSO is a separate step.
+///
+/// For `DeviceAuth::Mac`, the caller supplies an already-derived ephemeral MAC
+/// key. Private keys and ECDH operations remain outside this core.
 pub fn verify_device_auth(
     device_auth: &DeviceAuth,
     device_authentication_bytes: &[u8],
-    device_key_bytes: &[u8],
+    device_key: &coset::CoseKey,
     ephemeral_mac_key: Option<&[u8; 32]>,
 ) -> Result<DeviceAuthResult, MdocError> {
     match device_auth {
         DeviceAuth::Signature(sign1) => {
-            verify_device_signature(sign1, device_authentication_bytes, device_key_bytes)
+            verify_device_signature(sign1, device_authentication_bytes, device_key)
         }
         DeviceAuth::Mac(mac0) => {
             let mac_key = ephemeral_mac_key.ok_or_else(|| {
@@ -46,24 +54,14 @@ pub fn verify_device_auth(
 fn verify_device_signature(
     sign1: &coset::CoseSign1,
     device_authentication_bytes: &[u8],
-    device_key_bytes: &[u8],
+    device_key: &coset::CoseKey,
 ) -> Result<DeviceAuthResult, MdocError> {
-    crate::cose::validate_critical_headers(&sign1.protected, &sign1.unprotected)?;
-
-    // Extract algorithm from protected header
-    let alg = sign1.protected.header.alg.as_ref().ok_or_else(|| {
-        MdocError::DeviceAuth("missing algorithm in device signature".to_string())
-    })?;
-
-    let alg_id = match alg {
-        coset::Algorithm::Assigned(a) => *a as i64,
-        _ => {
-            return Err(MdocError::DeviceAuth(
-                "unsupported algorithm type".to_string(),
-            ))
-        }
-    };
-
+    if sign1.payload.is_some() {
+        return Err(MdocError::DeviceAuth(
+            "deviceSignature must use a detached payload".into(),
+        ));
+    }
+    let alg_id = crate::cose::validate_headers(&sign1.protected, &sign1.unprotected)?;
     let alg_name = crate::cose::cose_alg_to_name(alg_id).to_string();
 
     // Build the Sig_structure for verification
@@ -77,16 +75,8 @@ fn verify_device_signature(
         device_authentication_bytes,
     );
 
-    // Decode the device key as a COSE_Key
-    let device_cose_key = coset::CoseKey::from_slice(device_key_bytes)
-        .map_err(|e| MdocError::DeviceAuth(format!("parse device COSE_Key: {e}")))?;
-
-    let is_valid = crate::cose::verify_cose_signature(
-        &sig_structure,
-        &sign1.signature,
-        &device_cose_key,
-        alg_id,
-    )?;
+    let is_valid =
+        crate::cose::verify_cose_signature(&sig_structure, &sign1.signature, device_key, alg_id)?;
 
     Ok(DeviceAuthResult {
         is_valid,
@@ -99,7 +89,13 @@ fn verify_device_signature(
     })
 }
 
-fn verify_device_mac(
+/// Check an HMAC-256/256 COSE_Mac0 using an externally derived EMacKey.
+///
+/// As with [`verify_device_auth`], success only authenticates the supplied bytes
+/// under this key. The caller must establish the ECDH peer key and the correct
+/// SessionTranscriptBytes binding when deriving the key; this function does not
+/// authenticate the MSO, issuer, payload schema, or request context.
+pub fn verify_device_mac(
     mac0: &coset::CoseMac0,
     device_authentication_bytes: &[u8],
     mac_key: &[u8; 32],
@@ -107,21 +103,26 @@ fn verify_device_mac(
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
-    crate::cose::validate_critical_headers(&mac0.protected, &mac0.unprotected)?;
-
+    if mac0.payload.is_some() {
+        return Err(MdocError::DeviceAuth(
+            "deviceMac must use a detached payload".into(),
+        ));
+    }
     match mac0.protected.header.alg.as_ref() {
         Some(coset::Algorithm::Assigned(coset::iana::Algorithm::HMAC_256_256)) => {}
         Some(algorithm) => {
             return Err(MdocError::DeviceAuth(format!(
                 "unsupported COSE_Mac0 algorithm: {algorithm:?}"
-            )))
+            )));
         }
         None => {
             return Err(MdocError::DeviceAuth(
                 "missing algorithm in device MAC".to_string(),
-            ))
+            ));
         }
     }
+
+    crate::cose::validate_headers(&mac0.protected, &mac0.unprotected)?;
 
     // Build Mac_structure
     let mac_structure = coset::mac_structure_data(
@@ -229,9 +230,11 @@ mod tests {
 
         let error = verify_device_mac(&mac0, authentication, &key)
             .expect_err("a signature algorithm cannot identify a device MAC");
-        assert!(error
-            .to_string()
-            .contains("unsupported COSE_Mac0 algorithm"));
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported COSE_Mac0 algorithm")
+        );
     }
 
     #[test]
@@ -246,8 +249,10 @@ mod tests {
 
         let error = verify_device_mac(&mac0, authentication, &key)
             .expect_err("private-use MAC algorithms are not implemented");
-        assert!(error
-            .to_string()
-            .contains("unsupported COSE_Mac0 algorithm"));
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported COSE_Mac0 algorithm")
+        );
     }
 }
