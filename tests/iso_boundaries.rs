@@ -465,6 +465,85 @@ fn unknown_authenticated_item_semantics_cannot_be_dropped() {
 }
 
 #[test]
+fn compatible_minor_versions_preserve_issuer_and_holder_authentication() {
+    let original = issue(builder());
+    for version in ["1.1", "1.17", "01.002", "1.18446744073709551616"] {
+        let mut document = original.clone();
+        authenticate_mso(&mut document, |mso| {
+            *field_mut(mso, "version") = version.into();
+        });
+        let pending =
+            verify_issued(&document.to_issuer_signed_cbor().unwrap(), DOC_TYPE, now()).unwrap();
+        assert_eq!(pending.mso().version, version);
+        let document = present(document, &transcript());
+        let mut response: Value =
+            ciborium::from_reader(document.to_device_response_cbor().unwrap().as_slice()).unwrap();
+        *field_mut(&mut response, "version") = version.into();
+        let verified = verify(&encode(&response)).unwrap();
+        assert_eq!(verified[0].mso().version, version);
+
+        let wrong_session =
+            nazo_mdoc::session::SessionTranscript::redirect(nazo_mdoc::session::RedirectHandover {
+                client_id: "x509_san_dns:example.com",
+                nonce: "a-different-request",
+                jwk_thumbprint: None,
+                response_uri: "https://example.com/response",
+            })
+            .unwrap();
+        assert!(matches!(
+            nazo_mdoc::verify_presentation(
+                &encode(&response),
+                &wrong_session,
+                &nazo_mdoc::VerificationOptions {
+                    now: now(),
+                    max_documents: 1
+                },
+            ),
+            Err(MdocError::DeviceAuth(_))
+        ));
+    }
+}
+
+#[test]
+fn authenticated_rfu_key_information_is_preserved_without_extra_authority() {
+    let original = issue(builder());
+    for info in [
+        Value::Map(vec![]),
+        Value::Map(vec![
+            (1.into(), Value::Tag(60000, Box::new("reserved".into()))),
+            (u64::MAX.into(), Value::Bytes(vec![1, 2, 3])),
+        ]),
+    ] {
+        let mut document = original.clone();
+        authenticate_mso(&mut document, |mso| {
+            field_mut(mso, "deviceKeyInfo")
+                .as_map_mut()
+                .unwrap()
+                .push(("keyInfo".into(), info.clone()));
+        });
+        let pending =
+            verify_issued(&document.to_issuer_signed_cbor().unwrap(), DOC_TYPE, now()).unwrap();
+        assert_eq!(pending.mso().device_key_info.key_info, Some(info.clone()));
+        let unauthorized = tagged(&Value::Map(vec![(
+            NS.into(),
+            Value::Map(vec![("device_claim".into(), true.into())]),
+        )]));
+        assert!(matches!(
+            nazo_mdoc::response_builder::prepare_device_authentication(
+                document.clone(),
+                &transcript(),
+                unauthorized,
+                -7,
+            ),
+            Err(MdocError::DeviceAuth(_))
+        ));
+        let document = present(document, &transcript());
+        let verified = verify(&document.to_device_response_cbor().unwrap()).unwrap();
+        assert_eq!(verified[0].mso().device_key_info.key_info, Some(info));
+    }
+}
+
+#[test]
 fn unknown_authenticated_device_key_information_requires_explicit_profile_support() {
     for (name, extension) in [
         ("future_security", Value::Bool(true)),

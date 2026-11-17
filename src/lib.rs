@@ -31,7 +31,7 @@ pub mod time;
 pub mod verifier;
 
 pub use error::MdocError;
-pub use model::{MDoc, MDocStatus};
+pub use model::{DeviceResponse, DeviceResponseStatus};
 pub use parser::{parse, parse_hex};
 pub use time::Timestamp;
 pub use verifier::{PendingTrustDocument, VerificationOptions, verify_presentation};

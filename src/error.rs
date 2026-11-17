@@ -1,4 +1,4 @@
-//! Error types for the mdoc-rs crate.
+//! Error types for the nazo-mdoc protocol core.
 
 use thiserror::Error;
 

@@ -36,7 +36,7 @@ impl IssuerAuth {
         let mso = crate::cbor::raw::Item::parse(payload)?
             .embedded()?
             .value()?;
-        parse_mso_value(&mso)
+        parse_mso_value(mso)
     }
 
     /// Borrow the leaf certificate's DER from the unprotected x5chain header.
@@ -140,6 +140,20 @@ fn as_text<'a>(value: &'a Value, field: &str) -> Result<&'a str, MdocError> {
         .ok_or_else(|| mso_error(format!("{field} is not text")))
 }
 
+fn into_map(value: Value, field: &str) -> Result<Vec<(Value, Value)>, MdocError> {
+    match value {
+        Value::Map(entries) => Ok(entries),
+        _ => Err(mso_error(format!("{field} is not a CBOR map"))),
+    }
+}
+
+fn into_text(value: Value, field: &str) -> Result<String, MdocError> {
+    match value {
+        Value::Text(text) => Ok(text),
+        _ => Err(mso_error(format!("{field} is not text"))),
+    }
+}
+
 fn set_once<T>(slot: &mut Option<T>, value: T, field: &str) -> Result<(), MdocError> {
     if slot.replace(value).is_some() {
         return Err(mso_error(format!("duplicate {field}")));
@@ -154,7 +168,7 @@ fn required<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
 /// Parse and validate the MSO schema for byte decoding and issuance preparation.
 /// Raw byte inputs must first pass `cbor::raw::validate`. Builders also validate
 /// their final encoding so arbitrary extension values cannot carry duplicate keys.
-pub(crate) fn parse_mso_value(value: &Value) -> Result<Mso, MdocError> {
+pub(crate) fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     let mut version = None;
     let mut digest_algorithm = None;
     let mut doc_type = None;
@@ -164,26 +178,23 @@ pub(crate) fn parse_mso_value(value: &Value) -> Result<Mso, MdocError> {
     let mut status = None;
     let mut additional_fields = HashMap::new();
 
-    for (key, value) in as_map(value, "MSO")? {
-        let key = as_text(key, "MSO key")?;
-        match key {
-            "version" => set_once(&mut version, as_text(value, key)?.to_owned(), key)?,
+    for (key, value) in into_map(value, "MSO")? {
+        let key = into_text(key, "MSO key")?;
+        match key.as_str() {
+            "version" => set_once(&mut version, into_text(value, &key)?, &key)?,
             "digestAlgorithm" => {
-                let name = as_text(value, key)?;
-                let algorithm = DigestAlgorithm::from_str_name(name)
-                    .ok_or_else(|| MdocError::UnsupportedAlgorithm(name.to_owned()))?;
-                set_once(&mut digest_algorithm, algorithm, key)?;
+                let name = into_text(value, &key)?;
+                let algorithm = DigestAlgorithm::from_str_name(&name)
+                    .ok_or(MdocError::UnsupportedAlgorithm(name))?;
+                set_once(&mut digest_algorithm, algorithm, &key)?;
             }
-            "docType" => set_once(&mut doc_type, as_text(value, key)?.to_owned(), key)?,
-            "validityInfo" => set_once(&mut validity_info, parse_validity_info(value)?, key)?,
-            "valueDigests" => set_once(&mut value_digests, parse_value_digests(value)?, key)?,
-            "deviceKeyInfo" => set_once(&mut device_key_info, parse_device_key_info(value)?, key)?,
-            "status" => set_once(&mut status, parse_status(value)?, key)?,
+            "docType" => set_once(&mut doc_type, into_text(value, &key)?, &key)?,
+            "validityInfo" => set_once(&mut validity_info, parse_validity_info(value)?, &key)?,
+            "valueDigests" => set_once(&mut value_digests, parse_value_digests(value)?, &key)?,
+            "deviceKeyInfo" => set_once(&mut device_key_info, parse_device_key_info(value)?, &key)?,
+            "status" => set_once(&mut status, parse_status(value)?, &key)?,
             _ => {
-                if additional_fields
-                    .insert(key.to_owned(), value.clone())
-                    .is_some()
-                {
+                if additional_fields.insert(key, value).is_some() {
                     return Err(mso_error("duplicate MSO extension"));
                 }
             }
@@ -191,7 +202,7 @@ pub(crate) fn parse_mso_value(value: &Value) -> Result<Mso, MdocError> {
     }
 
     let version = required(version, "version")?;
-    if version != "1.0" {
+    if !super::types::supports_version(&version) {
         return Err(mso_error("unsupported MSO version"));
     }
     let digest_algorithm = required(digest_algorithm, "digestAlgorithm")?;
@@ -220,15 +231,15 @@ pub(crate) fn parse_mso_value(value: &Value) -> Result<Mso, MdocError> {
     })
 }
 
-fn parse_value_digests(value: &Value) -> Result<HashMap<String, HashMap<u32, Vec<u8>>>, MdocError> {
-    let namespaces = as_map(value, "valueDigests")?;
+fn parse_value_digests(value: Value) -> Result<HashMap<String, HashMap<u32, Vec<u8>>>, MdocError> {
+    let namespaces = into_map(value, "valueDigests")?;
     if namespaces.is_empty() {
         return Err(mso_error("valueDigests must not be empty"));
     }
     let mut result = HashMap::with_capacity(namespaces.len());
     for (namespace, values) in namespaces {
-        let namespace = as_text(namespace, "valueDigests namespace")?;
-        let values = as_map(values, "namespace digests")?;
+        let namespace = into_text(namespace, "valueDigests namespace")?;
+        let values = into_map(values, "namespace digests")?;
         if values.is_empty() {
             return Err(mso_error("namespace digests must not be empty"));
         }
@@ -239,22 +250,22 @@ fn parse_value_digests(value: &Value) -> Result<HashMap<String, HashMap<u32, Vec
                 .and_then(|id| u32::try_from(id).ok())
                 .filter(|id| *id < 1 << 31)
                 .ok_or_else(|| mso_error("digestID must be an unsigned integer below 2^31"))?;
-            let digest = digest
-                .as_bytes()
-                .ok_or_else(|| mso_error("digest value is not bytes"))?;
-            if digests.insert(id, digest.clone()).is_some() {
+            let Value::Bytes(digest) = digest else {
+                return Err(mso_error("digest value is not bytes"));
+            };
+            if digests.insert(id, digest).is_some() {
                 return Err(mso_error("duplicate digestID"));
             }
         }
-        if result.insert(namespace.to_owned(), digests).is_some() {
+        if result.insert(namespace, digests).is_some() {
             return Err(mso_error("duplicate valueDigests namespace"));
         }
     }
     Ok(result)
 }
 
-fn parse_status(value: &Value) -> Result<MsoStatus, MdocError> {
-    let mechanisms = as_map(value, "status")?;
+fn parse_status(value: Value) -> Result<MsoStatus, MdocError> {
+    let mechanisms = as_map(&value, "status")?;
     if mechanisms.is_empty() {
         return Err(mso_error("status must contain at least one mechanism"));
     }
@@ -297,25 +308,25 @@ fn parse_status(value: &Value) -> Result<MsoStatus, MdocError> {
     }
     Ok(MsoStatus {
         status_list,
-        raw: value.clone(),
+        raw: value,
     })
 }
 
-fn parse_validity_info(value: &Value) -> Result<ValidityInfo, MdocError> {
+fn parse_validity_info(value: Value) -> Result<ValidityInfo, MdocError> {
     let mut signed = None;
     let mut valid_from = None;
     let mut valid_until = None;
     let mut expected_update = None;
-    for (key, value) in as_map(value, "validityInfo")? {
-        let key = as_text(key, "validityInfo key")?;
-        let slot = match key {
+    for (key, value) in into_map(value, "validityInfo")? {
+        let key = into_text(key, "validityInfo key")?;
+        let slot = match key.as_str() {
             "signed" => &mut signed,
             "validFrom" => &mut valid_from,
             "validUntil" => &mut valid_until,
             "expectedUpdate" => &mut expected_update,
             _ => return Err(mso_error("unsupported validityInfo member")),
         };
-        set_once(slot, parse_datetime(value)?, key)?;
+        set_once(slot, parse_datetime(value)?, &key)?;
     }
     let validity = ValidityInfo {
         signed: required(signed, "validityInfo.signed")?,
@@ -327,50 +338,47 @@ fn parse_validity_info(value: &Value) -> Result<ValidityInfo, MdocError> {
     Ok(validity)
 }
 
-fn parse_datetime(value: &Value) -> Result<crate::time::Timestamp, MdocError> {
+fn parse_datetime(value: Value) -> Result<crate::time::Timestamp, MdocError> {
     let Value::Tag(0, inner) = value else {
         return Err(mso_error("MSO timestamps require tdate (Tag 0)"));
     };
-    let text = as_text(inner, "tdate content")?;
+    let text = into_text(*inner, "tdate content")?;
     if text.len() != 20 || !text.ends_with('Z') || text.as_bytes()[10] != b'T' {
         return Err(mso_error(
             "MSO timestamps require whole UTC seconds with Z offset",
         ));
     }
-    crate::time::Timestamp::parse_rfc3339(text).map_err(|_| mso_error("invalid MSO timestamp"))
+    crate::time::Timestamp::parse_rfc3339(&text).map_err(|_| mso_error("invalid MSO timestamp"))
 }
 
-fn parse_device_key_info(value: &Value) -> Result<DeviceKeyInfo, MdocError> {
+fn parse_device_key_info(value: Value) -> Result<DeviceKeyInfo, MdocError> {
     let mut device_key = None;
     let mut key_authorizations = None;
     let mut key_info = None;
     let mut additional_fields = HashMap::new();
-    for (key, value) in as_map(value, "deviceKeyInfo")? {
-        let key = as_text(key, "deviceKeyInfo key")?;
-        match key {
+    for (key, value) in into_map(value, "deviceKeyInfo")? {
+        let key = into_text(key, "deviceKeyInfo key")?;
+        match key.as_str() {
             "deviceKey" => {
-                let key = CoseKey::from_cbor_value(value.clone())
+                let key = CoseKey::from_cbor_value(value)
                     .map_err(|error| mso_error(format!("invalid device COSE_Key: {error}")))?;
                 set_once(&mut device_key, key, "deviceKey")?;
             }
             "keyAuthorizations" => set_once(
                 &mut key_authorizations,
                 parse_key_authorizations(value)?,
-                key,
+                &key,
             )?,
             "keyInfo" => {
-                for (label, _) in as_map(value, "keyInfo")? {
+                for (label, _) in as_map(&value, "keyInfo")? {
                     if label.as_integer().is_none() {
                         return Err(mso_error("keyInfo labels must be integers"));
                     }
                 }
-                set_once(&mut key_info, value.clone(), key)?;
+                set_once(&mut key_info, value, &key)?;
             }
             _ => {
-                if additional_fields
-                    .insert(key.to_owned(), value.clone())
-                    .is_some()
-                {
+                if additional_fields.insert(key, value).is_some() {
                     return Err(mso_error("duplicate deviceKeyInfo extension"));
                 }
             }
@@ -384,33 +392,33 @@ fn parse_device_key_info(value: &Value) -> Result<DeviceKeyInfo, MdocError> {
     })
 }
 
-fn parse_key_authorizations(value: &Value) -> Result<KeyAuthorizations, MdocError> {
+fn parse_key_authorizations(value: Value) -> Result<KeyAuthorizations, MdocError> {
     let mut name_spaces = None;
     let mut data_elements = None;
-    let fields = as_map(value, "keyAuthorizations")?;
+    let fields = into_map(value, "keyAuthorizations")?;
     if fields.is_empty() {
         return Err(mso_error("keyAuthorizations must not be empty"));
     }
     for (key, value) in fields {
-        let key = as_text(key, "keyAuthorizations key")?;
-        match key {
-            "nameSpaces" => set_once(&mut name_spaces, parse_authorized_names(value)?, key)?,
+        let key = into_text(key, "keyAuthorizations key")?;
+        match key.as_str() {
+            "nameSpaces" => set_once(&mut name_spaces, parse_authorized_names(value)?, &key)?,
             "dataElements" => {
-                let namespaces = as_map(value, "authorized dataElements")?;
+                let namespaces = into_map(value, "authorized dataElements")?;
                 if namespaces.is_empty() {
                     return Err(mso_error("authorized dataElements must not be empty"));
                 }
                 let mut elements = HashMap::with_capacity(namespaces.len());
                 for (namespace, names) in namespaces {
-                    let namespace = as_text(namespace, "authorized namespace")?;
+                    let namespace = into_text(namespace, "authorized namespace")?;
                     if elements
-                        .insert(namespace.to_owned(), parse_authorized_names(names)?)
+                        .insert(namespace, parse_authorized_names(names)?)
                         .is_some()
                     {
                         return Err(mso_error("duplicate authorized namespace"));
                     }
                 }
-                set_once(&mut data_elements, elements, key)?;
+                set_once(&mut data_elements, elements, &key)?;
             }
             _ => return Err(mso_error("unsupported keyAuthorizations member")),
         }
@@ -430,13 +438,15 @@ fn parse_key_authorizations(value: &Value) -> Result<KeyAuthorizations, MdocErro
     })
 }
 
-fn parse_authorized_names(value: &Value) -> Result<Vec<String>, MdocError> {
-    let values = value
-        .as_array()
-        .filter(|values| !values.is_empty())
-        .ok_or_else(|| mso_error("authorization list must be a nonempty array"))?;
+fn parse_authorized_names(value: Value) -> Result<Vec<String>, MdocError> {
+    let Value::Array(values) = value else {
+        return Err(mso_error("authorization list must be a nonempty array"));
+    };
+    if values.is_empty() {
+        return Err(mso_error("authorization list must be a nonempty array"));
+    }
     values
-        .iter()
-        .map(|value| as_text(value, "authorized name").map(str::to_owned))
+        .into_iter()
+        .map(|value| into_text(value, "authorized name"))
         .collect()
 }

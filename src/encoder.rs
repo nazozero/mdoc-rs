@@ -9,8 +9,8 @@ use coset::CborSerializable;
 
 use crate::cbor::raw::{self, push_head, push_text};
 use crate::error::MdocError;
+use crate::model::device_response::{DeviceResponse, DeviceResponseStatus};
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
-use crate::model::mdoc::{MDoc, MDocStatus};
 use crate::model::types::DeviceAuth;
 
 fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
@@ -145,7 +145,7 @@ pub fn encode_issuer_signed(issuer_signed: &IssuerSigned) -> Result<Vec<u8>, Mdo
 
 /// Encode an ISO DeviceResponse. Document-count policies, such as HAIP's
 /// separate DeviceResponse for each mdoc, belong to the presentation profile.
-pub fn encode_device_response(mdoc: &MDoc) -> Result<Vec<u8>, MdocError> {
+pub fn encode_device_response(mdoc: &DeviceResponse) -> Result<Vec<u8>, MdocError> {
     let mut out = Vec::new();
     out.push(0xa3);
     push_text(&mut out, "status");
@@ -161,7 +161,7 @@ pub fn encode_device_response(mdoc: &MDoc) -> Result<Vec<u8>, MdocError> {
     Ok(out)
 }
 
-impl MDoc {
+impl DeviceResponse {
     /// Encode this container as a DeviceResponse.
     pub fn to_cbor(&self) -> Result<Vec<u8>, MdocError> {
         encode_device_response(self)
@@ -185,7 +185,7 @@ impl IssuerSignedDocument {
         let mut out = Vec::new();
         out.push(0xa3);
         push_text(&mut out, "status");
-        push_head(&mut out, 0, MDocStatus::Ok as u64);
+        push_head(&mut out, 0, DeviceResponseStatus::Ok as u64);
         push_text(&mut out, "version");
         push_text(&mut out, "1.0");
         push_text(&mut out, "documents");

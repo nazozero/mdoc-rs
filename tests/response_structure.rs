@@ -1,9 +1,9 @@
 //! DeviceResponse envelope regressions, enabled without the issuance feature.
 //!
 //! Mutations start from the inherited ISO Annex D wire fixture. Parsing proves
-//! structure only: known error statuses and unknown textual versions remain
-//! visible in the model, while the presentation verifier must reject them
-//! before attempting issuer or holder authentication.
+//! structure only: known error statuses and textual versions remain visible in
+//! the model. The verifier rejects errors and unsupported major versions; an
+//! unknown minor version of major 1 must not prevent authentication.
 
 use ciborium::Value;
 use nazo_mdoc::{
@@ -95,12 +95,37 @@ fn device_response_version_is_required_text_and_supported_for_verification() {
             "version: {replacement:?}"
         );
     }
-    for version in ["", "0.9", "1.1", "2.0", "1.0\0"] {
+    for version in ["", "0.9", "2.0", "1", "1.", "1.a", "1.0.0", "1.0\0"] {
         let mut response = fixture();
         *field_mut(&mut response, "version") = version.into();
         let bytes = encode(&response);
         assert_eq!(parser::parse(&bytes).unwrap().version, version);
         assert_rejected_by_presentation_envelope(&bytes);
+    }
+}
+
+#[test]
+fn unknown_minor_response_version_reaches_authentication() {
+    let transcript = SessionTranscript::from_cbor(&[0x83, 0xf6, 0xf6, 0xf6]).unwrap();
+    for version in ["1.1", "1.17", "01.002", "1.18446744073709551616"] {
+        let mut response = fixture();
+        *field_mut(&mut response, "version") = version.into();
+        let bytes = encode(&response);
+        assert_eq!(parser::parse(&bytes).unwrap().version, version);
+        let result = verify_presentation(
+            &bytes,
+            &transcript,
+            &VerificationOptions {
+                now: Timestamp::from_unix_seconds(1_609_459_200).unwrap(),
+                max_documents: 1,
+            },
+        );
+        // Annex D uses DeviceMAC, which is outside this signature-only API.
+        // Reaching that gate proves the minor version itself was accepted.
+        assert!(
+            matches!(result, Err(MdocError::DeviceAuth(_))),
+            "{result:?}"
+        );
     }
 }
 

@@ -256,9 +256,10 @@ impl DocumentBuilder {
             self.status.as_ref(),
         )?;
 
-        // Validate semantic fields once before handing bytes to an external signer.
-        crate::model::issuer_auth::parse_mso_value(&mso_map)?;
         let mso_inner = data_item::encode_cbor_canonical(&mso_map)?;
+        // Move the decoded values through semantic validation after encoding;
+        // there is no need to clone the MSO tree before external signing.
+        crate::model::issuer_auth::parse_mso_value(mso_map)?;
         let mso_bytes = crate::cbor::raw::wrap_tag24_bytes(&mso_inner);
         crate::cbor::raw::validate(&mso_bytes)?;
         let alg = match algorithm {

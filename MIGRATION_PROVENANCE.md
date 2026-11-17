@@ -1,4 +1,11 @@
-# NazoAuth coset 0.4 migration provenance
+# NazoAuth mdoc maintenance provenance
+
+## Historical coset 0.4 migration
+
+The following record describes the earlier coset migration, including its then
+current parent, MSRV and test evidence. Those historical numbers do not describe
+the current `nazo-mdoc` package or certify its later changes. The maintained-core
+continuation is recorded in the final section of this document.
 
 This branch is maintained for NazoAuth and is not an upstream `mdoc-rs`
 release. Its parent is the controlled crates.io baseline tagged

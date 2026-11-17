@@ -214,9 +214,9 @@ fn haip_multiple_documents_are_rejected_before_partial_verification() {
     let doc = present(issue(builder()), &transcript());
     let mut second = doc.clone();
     second.issuer_signed.issuer_auth.cose_sign1.signature[0] ^= 1;
-    let response = MDoc {
+    let response = DeviceResponse {
         version: "1.0".into(),
-        status: MDocStatus::Ok,
+        status: DeviceResponseStatus::Ok,
         documents: vec![doc, second],
     };
     let encoded = response.to_cbor().unwrap();

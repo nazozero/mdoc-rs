@@ -213,6 +213,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?);
 
     let transcript = fixtures::transcript();
+    let redirect_context = candidate::session::RedirectHandover {
+        client_id: "x509_san_dns:example.com",
+        nonce: "test-nonce",
+        jwk_thumbprint: None,
+        response_uri: "https://example.com/response",
+    };
+    let dc_api_context = candidate::session::DcApiHandover {
+        origin: "https://example.com",
+        nonce: "test-nonce",
+        jwk_thumbprint: Some(&[42; 32]),
+    };
+    let dc_api_transcript = candidate::session::SessionTranscript::dc_api(dc_api_context)?;
     let holder_key = fixtures::holder_key();
     let device_key = fixtures::device_key();
     let device_key_bytes = device_key.clone().to_vec()?;
@@ -525,6 +537,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         },
     );
+    runner.candidate_only("final_redirect_transcript_validate_and_borrow", || {
+        let bound = candidate::session::SessionTranscript::validate_redirect(
+            black_box(transcript.as_bytes()),
+            black_box(redirect_context),
+        )
+        .expect("Final redirect context");
+        assert_eq!(bound.as_bytes().as_ptr(), transcript.as_bytes().as_ptr());
+        black_box(bound);
+    });
+    runner.candidate_only("final_dc_api_transcript_validate_and_borrow", || {
+        let bound = candidate::session::SessionTranscript::validate_dc_api(
+            black_box(dc_api_transcript.as_bytes()),
+            black_box(dc_api_context),
+        )
+        .expect("Final DC API context");
+        assert_eq!(
+            bound.as_bytes().as_ptr(),
+            dc_api_transcript.as_bytes().as_ptr()
+        );
+        black_box(bound);
+    });
 
     if options.check_only {
         println!(
@@ -570,6 +603,10 @@ fn write_metadata(
     annex: &[u8],
     response: &[u8],
 ) -> io::Result<()> {
+    // Public test presentations, saved after timing so an independent reviewer
+    // can recompute the recorded corpus hashes from the actual measured bytes.
+    std::fs::write(directory.join("annex-d-response.cbor"), annex)?;
+    std::fs::write(directory.join("synthetic-final-response.cbor"), response)?;
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;

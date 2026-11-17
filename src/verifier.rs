@@ -60,7 +60,7 @@ pub fn verify_presentation(
 ) -> Result<Vec<PendingTrustDocument>, MdocError> {
     let response =
         crate::parser::parse_with_limits(encoded, Limits::default(), options.max_documents)?;
-    if response.version != "1.0" || response.status != MDocStatus::Ok {
+    if !supports_version(&response.version) || response.status != DeviceResponseStatus::Ok {
         return Err(MdocError::Parse(
             "unsupported version or non-success DeviceResponse status".into(),
         ));
@@ -204,9 +204,19 @@ fn validate_claims(
             "docType differs from authenticated MSO".into(),
         ));
     }
+    // ISO 18013-5:2021 8.1 and 9.1.2.4 require ignoring positive RFU
+    // keyInfo labels. Retain their authenticated values without assigning them
+    // authorization semantics. Proprietary negative labels need a profile.
+    let unsupported_key_info = match &mso.device_key_info.key_info {
+        Some(ciborium::Value::Map(fields)) => fields.iter().any(|(label, _)| {
+            !matches!(label, ciborium::Value::Integer(label) if i128::from(*label) > 0)
+        }),
+        Some(_) => true,
+        None => false,
+    };
     if !mso.additional_fields.is_empty()
         || !mso.device_key_info.additional_fields.is_empty()
-        || mso.device_key_info.key_info.is_some()
+        || unsupported_key_info
     {
         return Err(MdocError::Mso(
             "unsupported MSO or DeviceKeyInfo extension".into(),

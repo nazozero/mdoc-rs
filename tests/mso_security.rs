@@ -143,7 +143,9 @@ fn mandatory_mso_fields_and_version_are_enforced() {
         remove(&mut value, key);
         assert!(parse(&value).is_err(), "missing {key} must fail");
     }
-    for version in ["", "0.9", "1.1", "2.0"] {
+    for version in [
+        "", "0.9", "2.0", "1", "1.", ".1", "1.1.0", "1.+1", "1.-1", "+1.0", "1.０", "1.0\0", "1. 1",
+    ] {
         let mut value = valid.clone();
         set(&mut value, "version", text(version));
         assert!(parse(&value).is_err(), "unsupported version {version}");
@@ -154,6 +156,27 @@ fn mandatory_mso_fields_and_version_are_enforced() {
         parse(&value).is_err(),
         "this core profile rejects empty docType"
     );
+}
+
+#[test]
+fn unknown_minor_mso_versions_are_accepted_and_preserved() {
+    // ISO 18013-5 §8.1: a known major version must not be rejected merely
+    // because its backwards-compatible minor version is unfamiliar.
+    for version in [
+        "1.0",
+        "1.1",
+        "1.12",
+        "01.002",
+        "1.999999999999999999999999999999999999999999999999999999",
+    ] {
+        let mut value = valid_mso();
+        set(&mut value, "version", text(version));
+        let encoded = tagged(encode(&value));
+        let auth = auth_with_payload(encoded.clone());
+        let parsed = auth.mso().expect("supported major version");
+        assert_eq!(parsed.version, version);
+        assert_eq!(auth.cose_sign1.payload.as_deref(), Some(encoded.as_slice()));
+    }
 }
 
 #[test]

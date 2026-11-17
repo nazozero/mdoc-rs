@@ -6,6 +6,11 @@ consumer boundary. The retained repository name preserves links and provenance;
 the new package name makes the intentionally breaking 0.3 API explicit. There is
 no permanent wrapper pretending to implement the old verifier's trust decisions.
 
+There is one `DeviceResponse` model shared by parsing and encoding. The former
+parallel `MDoc`/`DeviceResponse` representations and unimplemented request-model
+scaffolding were removed. Unknown status codes remain errors rather than being
+silently converted into a known general-error code.
+
 ## Data flow
 
 1. `cbor::raw` checks the wire envelope before building decoded containers. It
@@ -60,6 +65,21 @@ and reject invalid or oversized encoded output.
 - MSO decoding occurs once after successful issuer authentication in the main
   path. The pending result shares that decoded MSO with the host. Raw signed
   payloads remain available for independent verification or audit.
+- Temporary MSO values are consumed into the owned model. Strings, digest bytes,
+  extension values and device-key parameters move into their final owner rather
+  than being cloned from a disposable decoded tree. Item uniqueness sets borrow
+  names and salts from the input for the duration of parsing; the public item
+  owns only the values it must retain.
+- The status model retains both its whole decoded value and the convenient
+  known-reference projection. Its URI therefore has two owners by design:
+  callers need the complete extension to reject unknown mechanisms, and a typed
+  reference to handle the supported mechanism. Neither view replaces the signed
+  original MSO payload.
+- The pending result owns a leaf-first certificate chain for the host's trust
+  pipeline while retaining the document's original COSE object. That copy allows
+  `into_parts` to transfer both complete representations. A self-referential
+  result or a second public certificate-view abstraction would complicate this
+  lifetime for a small bounded chain; leaf-only access already borrows DER.
 - The raw scanner precedes higher-level decoding for security, so parsing is not
   claimed to be single-pass or allocation-free. Benchmark reports include its
   cost alongside savings from removed Value trees and duplicate host verification.
@@ -70,6 +90,27 @@ and reject invalid or oversized encoded output.
 - The explicit verification time avoids an implicit platform clock and permits
   deterministic tests and WASM consumers. RustCrypto curve dependencies use
   `alloc` instead of `std`, avoiding an unnecessary verifier entropy dependency.
+
+## Checks that cross an API boundary
+
+The raw scanner checks wire shape and resource limits before container
+allocation. The schema decoder checks the meaning and relationships of fields.
+These checks serve different purposes. Public COSE/model values are editable,
+so standalone verification primitives must also compare decoded protected
+headers with their original signed bytes and validate their public-key inputs.
+A result from a previous parse cannot authorize skipping these checks after a
+caller can mutate that model.
+
+The host's key lease verifies its own signing-key contract. Issuance `finish`
+checks the returned signature against the document-signing certificate key.
+Those bindings are not interchangeable. The core never exposes a switch that
+would let a caller assert either binding without evidence.
+
+Final transcript validation hashes context directly and compares the complete
+expected framing and digest with the supplied bytes. Its success result borrows
+that buffer; it does not construct an intermediate CBOR value or expected-byte
+vector. The dedicated benchmark cases measure this narrow path separately from
+owned transcript construction and allocating credential verification.
 
 ## Fail-closed profiles
 

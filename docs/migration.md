@@ -21,6 +21,7 @@ branch must resolve both dependencies together rather than choose one lockfile.
 
 | Previous API/representation | Replacement |
 | --- | --- |
+| `MDoc`, duplicate response/request scaffolding | One `DeviceResponse` model with fallible `DeviceResponseStatus::from_u8`; unused proximity request placeholders removed |
 | `Verifier`, `VerifyOptions`, `VerifiedMDoc.is_valid`, assessments | `verify_presentation` + explicit time/profile + `PendingTrustDocument` |
 | Mutable assessment overrides to compensate for duplicate checks | One protocol authentication followed by the host's trust/status decision |
 | `disable_certificate_chain_validation` | Removed; core never claims to establish certificate trust |

@@ -45,6 +45,8 @@ Output belongs outside source repositories. The harness writes:
 * `metadata.txt`: revision, dirty status, toolchain, source/binary/fixture hashes,
   platform, CPU affinity, workload sizes and measurement semantics.
 * `source-manifest.txt`: hashes of the candidate and harness Rust/Cargo inputs.
+* `annex-d-response.cbor` and `synthetic-final-response.cbor`: the actual public
+  test presentations, saved after timing for independent corpus-hash checks.
 
 Render the recorded CSV values as a readable report with:
 
@@ -125,6 +127,8 @@ credentials. Full verification returns pending external trust.
 | `final_device_signature_verify` | Both verify the exact same valid Final Tag 24 detached payload/signature. Baseline decodes an encoded COSE key; candidate borrows a parsed key and adds header/detached-mode constraints. This primitive comparison does not mean the old full verifier handles Final. |
 | `issue_two_attributes_es256` | Same logical issuance task and real local fixture signer. Candidate also validates certificate/schema, limits digest IDs to 31 bits, keeps complete Tag 24 envelopes and verifies the returned signature against the leaf certificate's public key. Baseline `sign` has no equivalent post-signing confirmation. Different acceptance rules and additional work are intentional. |
 | `final_full_protocol_verification_pending_external_trust` | Candidate-only successful parse + issuer signature + digests + MSO/time + holder proof. No comparable baseline full-verifier number is reported. X.509 trust, certificate revocation, MSO-status HTTP and application admission are excluded. |
+| `final_redirect_transcript_validate_and_borrow` | Candidate-only Final redirect context hashing and exact-byte validation, with pointer identity asserted. Input and context construction occur before timing. Allocation results apply to this successful borrowed validator, not to transcript construction or complete credential verification. |
+| `final_dc_api_transcript_validate_and_borrow` | The corresponding Final DC API validation, including the encryption-key thumbprint. The baseline has no equivalent Final context validator. |
 
 The preflight explicitly demonstrates that the unmodified baseline full verifier
 fails the holder-signature check for the Final fixture because of its legacy

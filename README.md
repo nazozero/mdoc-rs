@@ -5,8 +5,10 @@ binding. This is the maintained continuation of the BSD-2-Clause `mdoc-rs`
 codebase used by NazoAuth, with a deliberately smaller responsibility boundary.
 
 The package is `nazo-mdoc` (`nazo_mdoc` in Rust), version 0.3.0. The repository
-remains `nazozero/mdoc-rs`; the original source, licenses and production revision
-remain in its Git history. The package has not been published merely by changing
+remains `nazozero/mdoc-rs`; the imported source, license records and production
+revision remain in this repository's Git history. The original upstream's full
+Git history was unavailable; the recorded crates.io source archive is the import
+origin. The package has not been published merely by changing
 its manifest. Until a release is explicitly published, depend on an immutable
 Git revision containing this package.
 
@@ -87,6 +89,9 @@ namespace and schema; the generic builder never infers schema from attribute nam
   EdDSA/Ed25519. Declared algorithm, key type, curve and operation must agree.
   ECDSA requires fixed-width COSE r||s; Ed25519 uses strict verification.
 - MSO digest algorithms: SHA-256, SHA-384, SHA-512 with exact digest lengths.
+- Issuance emits version `1.0`. Reception accepts unknown numeric minor versions
+  of major version 1 for DeviceResponse and MSO, as required by ISO 18013-5 §8.1;
+  changing a minor version does not bypass signature or schema validation.
 - CBOR: definite lengths, shortest integer/length encodings, no duplicate keys
   or trailing items, valid UTF-8, bounded embedded Tag 24 items. Protocol map
   keys are integers/text/byte strings; compound and floating-point keys are
@@ -103,8 +108,10 @@ namespace and schema; the generic builder never infers schema from attribute nam
   explicit HMAC primitive using an externally derived key, not enabled by the
   server presentation verifier. The HKDF helper hashes SessionTranscriptBytes.
 - Unsupported critical headers, header extensions, ambiguous auth mechanisms,
-  unknown MSO/DeviceKeyInfo security extensions and keyInfo are rejected by the
-  server profile. `status` is preserved for explicit host policy.
+  unknown MSO/DeviceKeyInfo security extensions and proprietary keyInfo semantics
+  are rejected by the server profile. Positive keyInfo labels reserved for future
+  use are preserved and ignored as required by ISO; they grant no authorization.
+  `status` is preserved for explicit host policy.
 
 This is not a complete ISO proximity reader/wallet or a claim of full ISO,
 OpenID or HAIP certification. Unsupported Brainpool/Ed448 algorithms, transport
@@ -125,13 +132,17 @@ projection of a leap second. The production core does not depend on Chrono.
 
 ```sh
 cargo fmt --check
-cargo check --no-default-features
-cargo test --all-features
-cargo clippy --all-features --all-targets -- -D warnings
-cargo audit
-cargo check --target wasm32-unknown-unknown --no-default-features
-cargo check --target wasm32-unknown-unknown --features issue,wasm-js
-cargo check --target wasm32-wasip2 --features issue
+cargo check --locked --no-default-features
+cargo test --locked --no-default-features
+cargo test --locked --no-default-features --features issue
+cargo test --locked --all-features
+cargo clippy --locked --all-features --all-targets -- -D warnings
+cargo audit --deny warnings
+cargo build --locked --no-default-features
+cargo build --locked --all-features
+cargo build --locked --target wasm32-unknown-unknown --no-default-features
+cargo build --locked --target wasm32-unknown-unknown --no-default-features --features issue,wasm-js
+cargo build --locked --target wasm32-wasip2 --no-default-features --features issue
 cargo +nightly fuzz run decode -- -max_total_time=120
 cargo run --release --manifest-path benchmarks/compare/Cargo.toml
 ```
@@ -142,12 +153,26 @@ and property-based malformed-input tests. See the benchmark's methodology for
 comparison scope; strict parsing and new security checks are measured rather
 than described as free or allocation-free.
 
-The [2026-11-17 validation checkpoint](docs/validation-2026-11-17.md) records
-exact runtime revisions, CI, advisory findings and measured performance,
-including regressions and comparison limits.
+The [2026-11-17 historical validation checkpoint](docs/validation-2026-11-17.md)
+records exact runtime revisions, CI, advisory findings and measured performance,
+including regressions and comparison limits. Its measurements describe the named
+checkpoint; subsequent runtime changes require their own validation evidence.
 
-## License and source
+## Authorship, maintenance and source
+
+NazoZero Contributors maintain the `nazo-mdoc` continuation and its NazoAuth
+integration. Kushal Das authored the original `mdoc-rs` codebase. Both are
+credited in Cargo's `authors` metadata; this does not imply that the original
+author maintains or endorses this continuation. The source import and subsequent
+maintenance changes are recorded separately in the provenance documents.
+
+Read the [migration guide](docs/migration.md) before deploying the new verifier.
+Some credentials produced by the old unrestricted-u32 digest-ID generator need
+authorized reissuance. Passing tests on an in-range historical credential does
+not establish compatibility with every credential previously issued.
 
 BSD-2-Clause. See [LICENSE](LICENSE), [UPSTREAM_PROVENANCE.md](UPSTREAM_PROVENANCE.md)
 and [MIGRATION_PROVENANCE.md](MIGRATION_PROVENANCE.md). Original author attribution
-is retained. No ISO standard full text is redistributed in this repository.
+and the existing copyright notice are retained. The source-import record explains
+that the archive did not contain a standalone license file and how this mirror's
+license notice was established. No ISO standard full text is redistributed here.

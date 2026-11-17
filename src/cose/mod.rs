@@ -94,7 +94,7 @@ pub(crate) fn validate_headers(
 /// Validate the COSE critical-header contract implemented by this crate.
 ///
 /// RFC 9052 requires every entry in `crit` to name a protected header that the
-/// recipient understands and processes. mdoc-rs currently processes only the
+/// recipient understands and processes. This profile currently processes only the
 /// protected `alg` header, so all other assigned, text, and private-use labels
 /// fail closed. A `crit` parameter in the unprotected bucket is always invalid.
 pub(crate) fn validate_critical_headers(
@@ -220,7 +220,7 @@ mod tests {
             .expect("coset 0.4 represents private-use critical labels");
 
         let error = validate_critical_headers(&parsed.protected, &parsed.unprotected)
-            .expect_err("mdoc-rs does not implement this private-use header");
+            .expect_err("this profile does not implement this private-use header");
         assert!(error.to_string().contains("private-use critical"));
     }
 

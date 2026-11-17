@@ -1,6 +1,9 @@
-# Validation checkpoint: 2026-11-17
+# Historical validation checkpoint: 2026-11-17
 
-This checkpoint records the final runtime `2492f361`: CBOR Tag 2/3 is
+This checkpoint records runtime `2492f361`, before the subsequent ownership,
+minor-version, RFU and namespace corrections. Those changes require new
+revision-specific test and performance evidence; results below apply only to
+this recorded checkpoint. At `2492f361`, CBOR handling has these properties: CBOR Tag 2/3 is
 preserved through every protocol projection, undefined is rejected instead of
 being mapped to null, and canonical issuance rejects nonpreferred bignum inputs.
 The same eleven wire regressions fail on the exact previous `d52cfca` checkpoint
@@ -85,7 +88,7 @@ application APIs, persistence models and other workspace crates. The application
 PR records that separate strict-gate issue and its targeted Actix security update.
 Core CI passing does not establish that every host release gate passes.
 
-## Final runtime performance run
+## Recorded runtime performance run
 
 The `run-03` evidence was collected from the runtime above on Linux x86-64,
 AMD EPYC 9V74, pinned to the one permitted CPU. Both variants use the same
@@ -175,7 +178,7 @@ allocator self-check, independent consumers, structure collector and CSV
 summarizer. Evidence retains all 25,000 raw observations, quantiles, hashes,
 Cargo artifacts, commands, build logs, audit JSON and failed/historical runs.
 
-The final comparison executable SHA-256 is
+This checkpoint comparison executable SHA-256 is
 `b091cb5e2967ec9c9940e3ce64bcc0050f5ed19f4d814eaeade5ae521c5a37b7`.
 The source-manifest aggregate is
 `06ef1b53c5f5bac13fbad50841c8613fa221f99c8f4056c59c34d1886e06abd1`.

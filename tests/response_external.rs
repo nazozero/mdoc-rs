@@ -137,6 +137,37 @@ fn preparing_rejects_unauthorized_device_namespaces() {
 }
 
 #[test]
+fn preparing_rejects_empty_device_items_even_for_an_authorized_namespace() {
+    let document = with_authorizations(
+        issue(builder()),
+        Value::Map(vec![(
+            "nameSpaces".into(),
+            Value::Array(vec!["device.example".into()]),
+        )]),
+    );
+    let empty_items = tagged(&Value::Map(vec![(
+        "device.example".into(),
+        Value::Map(vec![]),
+    )]));
+    assert!(matches!(
+        prepare_device_authentication(document.clone(), &transcript(), empty_items, -7),
+        Err(nazo_mdoc::MdocError::Issuance(ref reason)) if reason == "empty DeviceSignedItems map"
+    ));
+    // The complete map may still be empty, independently of authorizations.
+    let prepared =
+        prepare_device_authentication(document, &transcript(), EMPTY_NAMESPACES.to_vec(), -7)
+            .unwrap();
+    let signature: p256::ecdsa::Signature = holder_key().sign(prepared.signing_input());
+    let document = prepared.finish(signature.to_bytes().to_vec()).unwrap();
+    assert_eq!(
+        verify(&document.to_device_response_cbor().unwrap())
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn authorized_device_namespace_is_signed_and_encoded_without_reordering_raw_map() {
     let document = with_authorizations(
         issue(builder()),

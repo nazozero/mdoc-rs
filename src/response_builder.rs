@@ -158,6 +158,9 @@ fn decode_namespaces(
             }
             values.insert(name.to_owned(), value.value()?);
         }
+        if values.is_empty() {
+            return Err(MdocError::Issuance("empty DeviceSignedItems map".into()));
+        }
         decoded.insert(name.to_owned(), values);
     }
     Ok(decoded)

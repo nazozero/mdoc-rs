@@ -18,7 +18,7 @@ fn missing<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
 }
 
 /// Decode a bounded DeviceResponse; this does not authenticate its contents.
-pub fn parse(bytes: &[u8]) -> Result<MDoc, MdocError> {
+pub fn parse(bytes: &[u8]) -> Result<DeviceResponse, MdocError> {
     parse_with_limits(bytes, Limits::default(), 16)
 }
 
@@ -31,7 +31,7 @@ pub fn parse_with_limits(
     bytes: &[u8],
     limits: Limits,
     max_documents: usize,
-) -> Result<MDoc, MdocError> {
+) -> Result<DeviceResponse, MdocError> {
     let root = Item::parse_with_limits(bytes, limits)?;
     let (mut version, mut status, mut documents) = (None, None, None);
     for entry in root.map()? {
@@ -63,12 +63,10 @@ pub fn parse_with_limits(
         }
     }
     let status = missing(status, "status")?;
-    if !matches!(status, 0 | 10 | 11 | 12) {
-        return Err(error("unknown DeviceResponse status"));
-    }
-    Ok(MDoc {
+    Ok(DeviceResponse {
         version: missing(version, "version")?,
-        status: MDocStatus::from_u8(status),
+        status: DeviceResponseStatus::from_u8(status)
+            .ok_or_else(|| error("unknown DeviceResponse status"))?,
         documents: missing(documents, "documents")?,
     })
 }
@@ -143,16 +141,7 @@ fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, 
                     let mut identifiers = HashSet::new();
                     let mut items = Vec::with_capacity(values.len());
                     for value in values {
-                        let item = parse_item(value?)?;
-                        if !ids.insert(item.digest_id)
-                            || !identifiers.insert(item.element_identifier.clone())
-                        {
-                            return Err(error("duplicate digestID or elementIdentifier"));
-                        }
-                        if !salts.insert(item.random.clone()) {
-                            return Err(error("reused IssuerSignedItem random"));
-                        }
-                        items.push(item);
+                        items.push(parse_item(value?, &mut ids, &mut identifiers, &mut salts)?);
                     }
                     name_spaces.insert(namespace.to_owned(), items);
                 }
@@ -169,7 +158,12 @@ fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, 
     })
 }
 
-fn parse_item(value: Item<'_>) -> Result<IssuerSignedItem, MdocError> {
+fn parse_item<'a>(
+    value: Item<'a>,
+    ids: &mut HashSet<u32>,
+    identifiers: &mut HashSet<&'a str>,
+    salts: &mut HashSet<&'a [u8]>,
+) -> Result<IssuerSignedItem, MdocError> {
     let encoded = value.bytes();
     let inner = value.embedded()?;
     let (mut digest_id, mut random, mut element_identifier, mut element_value) =
@@ -189,24 +183,36 @@ fn parse_item(value: Item<'_>) -> Result<IssuerSignedItem, MdocError> {
                 if salt.len() < 16 {
                     return Err(error("IssuerSignedItem random must be at least 16 bytes"));
                 }
-                random = Some(salt.to_vec());
+                random = Some(salt);
             }
             "elementIdentifier" => {
                 let identifier = value.text()?;
                 if identifier.is_empty() {
                     return Err(error("empty elementIdentifier"));
                 }
-                element_identifier = Some(identifier.to_owned());
+                element_identifier = Some(identifier);
             }
             "elementValue" => element_value = Some(value.value()?),
             _ => return Err(error("unsupported IssuerSignedItem field")),
         }
     }
+    let digest_id = missing(digest_id, "digestID")?;
+    let random = missing(random, "random")?;
+    let element_identifier = missing(element_identifier, "elementIdentifier")?;
+    let element_value = missing(element_value, "elementValue")?;
+    if !ids.insert(digest_id) || !identifiers.insert(element_identifier) {
+        return Err(error("duplicate digestID or elementIdentifier"));
+    }
+    if !salts.insert(random) {
+        return Err(error("reused IssuerSignedItem random"));
+    }
+    // The uniqueness sets borrow the input; only the public owned model copies
+    // these fields. No reference to an item being moved into the vector escapes.
     Ok(IssuerSignedItem {
-        digest_id: missing(digest_id, "digestID")?,
-        random: missing(random, "random")?,
-        element_identifier: missing(element_identifier, "elementIdentifier")?,
-        element_value: missing(element_value, "elementValue")?,
+        digest_id,
+        random: random.to_vec(),
+        element_identifier: element_identifier.to_owned(),
+        element_value,
         encoded: encoded.to_vec(),
     })
 }
@@ -234,6 +240,9 @@ fn parse_device_signed(value: Item<'_>, limits: Limits) -> Result<DeviceSigned, 
                             return Err(error("empty device elementIdentifier"));
                         }
                         decoded.insert(identifier.to_owned(), value.value()?);
+                    }
+                    if decoded.is_empty() {
+                        return Err(error("empty DeviceSignedItems map"));
                     }
                     name_spaces.insert(namespace.to_owned(), decoded);
                 }
@@ -323,7 +332,7 @@ fn parse_device_auth(value: Item<'_>, limits: Limits) -> Result<DeviceAuth, Mdoc
 }
 
 /// Decode a hex fixture, ignoring ASCII whitespace.
-pub fn parse_hex(text: &str) -> Result<MDoc, MdocError> {
+pub fn parse_hex(text: &str) -> Result<DeviceResponse, MdocError> {
     let mut bytes = Vec::with_capacity(text.len() / 2);
     let mut high = None;
     for c in text.bytes().filter(|c| !c.is_ascii_whitespace()) {

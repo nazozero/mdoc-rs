@@ -5,6 +5,17 @@ use coset::{CoseKey, CoseMac0, CoseSign1};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// ISO 18013-5 §8.1 requires accepting an unknown minor version of a known
+/// major version. Compare decimal text without imposing an integer-size limit.
+pub(crate) fn supports_version(version: &str) -> bool {
+    let Some((major, minor)) = version.split_once('.') else {
+        return false;
+    };
+    major.trim_start_matches('0') == "1"
+        && !minor.is_empty()
+        && minor.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 /// Digest algorithm for MSO value digests.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigestAlgorithm {
@@ -52,7 +63,8 @@ impl DigestAlgorithm {
 /// authenticated claims through the protocol verifier before making decisions.
 #[derive(Clone, Debug)]
 pub struct Mso {
-    /// MSO version (must be "1.0").
+    /// Received MSO version. Major version 1 with any numeric minor version is
+    /// supported; issuance uses "1.0" (ISO 18013-5 §8.1).
     pub version: String,
     /// Digest algorithm for value digests.
     pub digest_algorithm: DigestAlgorithm,
