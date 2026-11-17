@@ -57,7 +57,8 @@ def main() -> None:
         "The legacy DeviceAuthentication constructors omit the outer Tag 24 and do not produce equivalent protocol output.",
         "The preflight proves that the unmodified baseline full verifier rejects the Final holder signature; its failing path is not measured as a successful baseline verification.",
         "The candidate-only full protocol row is a pending-trust result, not NazoAuth's final credential admission or an HTTP endpoint.",
-        "The issuance row includes new schema/key/certificate checks and confirmation of the external signature; added work is not hidden.",
+        "The issuance row uses the same real local fixture signer. Candidate adds schema/key/certificate checks and confirms the returned signature against the leaf certificate's public key; baseline sign has no equivalent post-signing verification.",
+        "NazoAuth's external signer path already checks signatures against the leased public JWK. Core certificate-key confirmation is a separate binding; the application must not skip it or infer that its local signing path already performs the external-key check.",
         "See the harness README and metadata.txt for source identity, dependency-feature unification, hardware, affinity and limitations.",
         "",
     ]

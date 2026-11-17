@@ -61,4 +61,5 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install nightly --profile minimal
       - run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
+      - run: python3 fuzz/seed.py
       - run: cargo +nightly fuzz run decode -- -max_total_time=120 -timeout=5 -max_len=65536 -rss_limit_mb=2048

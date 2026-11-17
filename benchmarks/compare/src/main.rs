@@ -118,8 +118,10 @@ fn attributes() -> Vec<(&'static str, ciborium::Value)> {
     ]
 }
 
-fn baseline_builder(key: &coset::CoseKey) -> baseline::builder::DocumentBuilder {
-    let now = fixtures::now();
+fn baseline_builder(
+    key: &coset::CoseKey,
+    now: chrono::DateTime<Utc>,
+) -> baseline::builder::DocumentBuilder {
     baseline::builder::DocumentBuilder::new(fixtures::DOC_TYPE)
         .add_namespace(fixtures::NS, attributes())
         .device_key(key.clone())
@@ -131,18 +133,27 @@ fn baseline_builder(key: &coset::CoseKey) -> baseline::builder::DocumentBuilder 
         })
 }
 
-fn candidate_builder(key: &coset::CoseKey) -> candidate::builder::DocumentBuilder {
+fn candidate_builder(
+    key: &coset::CoseKey,
+    now: chrono::DateTime<Utc>,
+) -> candidate::builder::DocumentBuilder {
     candidate::builder::DocumentBuilder::new(fixtures::DOC_TYPE)
         .add_namespace(fixtures::NS, attributes())
         .device_key(key.clone())
-        .validity(fixtures::validity())
+        .validity(candidate::model::ValidityInfo {
+            signed: now,
+            valid_from: now,
+            valid_until: now + Duration::days(30),
+            expected_update: None,
+        })
 }
 
 fn issue_candidate(
     key: &coset::CoseKey,
     signer: &ExternalSigner,
+    now: chrono::DateTime<Utc>,
 ) -> candidate::model::IssuerSignedDocument {
-    let prepared = candidate_builder(key)
+    let prepared = candidate_builder(key, now)
         .prepare(
             candidate::model::CoseAlgorithm::ES256,
             vec![signer.certificate.clone()],
@@ -243,7 +254,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         key: fixtures::issuer_key(),
         certificate: hex::decode(fixtures::GENUINE_CERT_HEX)?,
     };
-    let candidate_issued = issue_candidate(&device_key, &signer);
+    let issuance_time = fixtures::now();
+    let candidate_issued = issue_candidate(&device_key, &signer, issuance_time);
     let response = fixtures::present(candidate_issued, &transcript).to_device_response_cbor()?;
     let verify_options = candidate::VerificationOptions {
         now: fixtures::now(),
@@ -472,13 +484,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "candidate_adds_validation_and_signature_confirmation",
         || {
             black_box(
-                baseline_builder(&device_key)
+                baseline_builder(&device_key, issuance_time)
                     .sign(&signer)
                     .expect("baseline issuance"),
             );
         },
         || {
-            black_box(issue_candidate(&device_key, &signer));
+            black_box(issue_candidate(&device_key, &signer, issuance_time));
         },
     );
     runner.candidate_only(
