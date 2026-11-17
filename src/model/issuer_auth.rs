@@ -33,9 +33,9 @@ impl IssuerAuth {
             .payload
             .as_deref()
             .ok_or_else(|| mso_error("missing COSE_Sign1 payload"))?;
-        let bytes = crate::cbor::raw::tag24_inner(payload)?;
-        let mso: Value =
-            ciborium::from_reader(bytes).map_err(|e| mso_error(format!("decode MSO: {e}")))?;
+        let mso = crate::cbor::raw::Item::parse(payload)?
+            .embedded()?
+            .value()?;
         parse_mso_value(&mso)
     }
 

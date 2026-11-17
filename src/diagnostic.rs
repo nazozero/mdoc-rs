@@ -20,9 +20,9 @@ pub fn to_diagnostic(value: &Value) -> String {
 }
 
 /// Decode CBOR bytes and render them in diagnostic notation. Returns a short
-/// error marker string if the bytes are not valid CBOR.
+/// error marker string for bytes outside the supported bounded CBOR profile.
 pub fn bytes_to_diagnostic(bytes: &[u8]) -> String {
-    match ciborium::from_reader::<Value, _>(bytes) {
+    match crate::cbor::decode_cbor(bytes) {
         Ok(v) => to_diagnostic(&v),
         Err(e) => format!("<invalid CBOR: {e}>"),
     }
@@ -136,10 +136,12 @@ mod tests {
     fn bytes_to_diagnostic_round_trips() {
         let v = Value::Map(vec![(
             Value::Text("k".into()),
-            Value::Tag(24, Box::new(Value::Bytes(vec![0x01, 0x02]))),
+            Value::Tag(24, Box::new(Value::Bytes(vec![0x82, 0x01, 0x02]))),
         )]);
         let mut buf = Vec::new();
         ciborium::into_writer(&v, &mut buf).unwrap();
-        assert_eq!(bytes_to_diagnostic(&buf), "{\"k\": 24(h'0102')}");
+        assert_eq!(bytes_to_diagnostic(&buf), "{\"k\": 24(h'820102')}");
+        assert_eq!(bytes_to_diagnostic(&[0xc2, 0x41, 0x01]), "2(h'01')");
+        assert!(bytes_to_diagnostic(&[0xf7]).starts_with("<invalid CBOR:"));
     }
 }

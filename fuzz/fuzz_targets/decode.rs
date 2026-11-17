@@ -7,6 +7,7 @@ fuzz_target!(|input: &[u8]| {
         let _ = nazo_mdoc::cbor::date::FullDate::new(text);
     }
     let _ = nazo_mdoc::cbor::raw::validate(input);
+    let _ = nazo_mdoc::cbor::decode_cbor(input);
     let _ = nazo_mdoc::session::SessionTranscript::from_cbor(input);
     if let Ok(response) = nazo_mdoc::parse(input) {
         for document in response.documents {

@@ -1,7 +1,7 @@
 //! COSE key and signature utilities for mdoc.
 
 use crate::error::MdocError;
-use coset::{RegisteredLabelWithPrivate, iana};
+use coset::{AsCborValue, RegisteredLabelWithPrivate, iana};
 
 pub mod key;
 mod verify;
@@ -9,9 +9,11 @@ mod verify;
 pub use key::{CoseKeyExt, cose_alg_to_name};
 pub use verify::{validate_verification_key, verify_cose_signature};
 
-/// Check the wire-label profile independently of decoded header defaults.
-/// The returned bitset records the labels that actually occurred on the wire.
-pub(crate) fn raw_header_labels(header: crate::cbor::raw::Item<'_>) -> Result<u64, MdocError> {
+/// Check wire labels and decode without normalizing tags into field types.
+/// The bitset records the labels that actually occurred on the wire.
+pub(crate) fn parse_header(
+    header: crate::cbor::raw::Item<'_>,
+) -> Result<(u64, coset::Header), MdocError> {
     let mut labels = 0u64;
     for entry in header.map()? {
         let (label, _) = entry?;
@@ -21,7 +23,7 @@ pub(crate) fn raw_header_labels(header: crate::cbor::raw::Item<'_>) -> Result<u6
         };
         labels |= 1 << label;
     }
-    Ok(labels)
+    Ok((labels, coset::Header::from_cbor_value(header.value()?)?))
 }
 
 /// Validate a signature/MAC header without silently accepting security extensions.
@@ -31,12 +33,12 @@ pub(crate) fn validate_headers(
 ) -> Result<i64, MdocError> {
     let mut original_labels = 0;
     if let Some(original) = &protected.original_data {
-        use coset::CborSerializable;
         let decoded = if original.is_empty() {
             coset::Header::default()
         } else {
-            original_labels = raw_header_labels(crate::cbor::raw::Item::parse(original)?)?;
-            coset::Header::from_slice(original)?
+            let (labels, decoded) = parse_header(crate::cbor::raw::Item::parse(original)?)?;
+            original_labels = labels;
+            decoded
         };
         if decoded != protected.header {
             return Err(MdocError::Cose(

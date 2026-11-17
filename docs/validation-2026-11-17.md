@@ -1,5 +1,14 @@
 # Validation checkpoint: 2026-11-17
 
+**Subsequent correction:** the runtime after `d52cfca` preserves CBOR Tag 2/3
+through every protocol projection, rejects undefined instead of treating it as
+null, and enforces preferred bignum inputs in canonical issuance. Its local
+all-feature/minimum suites pass 187/128 tests, with Clippy and strict audit also
+passing. All eleven added wire regressions fail on the exact `d52cfca` checkpoint
+and pass after the correction. The measurements below remain explicitly bound
+to `d52cfca`; they must not be reported as this later runtime's performance.
+New runtime CI, artifact collection and a separate performance run are required.
+
 This is implementation evidence, not an ISO/OpenID certification claim. The
 normative scope, unavailable licensed text and unsupported capabilities are in
 [protocol-matrix.md](protocol-matrix.md). Historical evidence must not be

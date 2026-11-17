@@ -169,7 +169,11 @@ fn scan(
             }
             Ok(head + size)
         }
-        7 => Ok(head),
+        // `ciborium::Value` maps undefined to null. Our supported value model
+        // has no undefined/simple extension variant, so reject those wire
+        // values rather than silently erase the distinction during projection.
+        7 if matches!(bytes[0] & 31, 20..=22 | 25..=27) => Ok(head),
+        7 => Err(error("unsupported CBOR simple value")),
         _ => unreachable!("three-bit CBOR major type"),
     }
 }
@@ -262,7 +266,40 @@ impl<'a> Item<'a> {
     }
 
     pub(crate) fn value(self) -> Result<ciborium::Value, MdocError> {
-        ciborium::from_reader(self.bytes).map_err(|e| error(&e.to_string()))
+        use ciborium::Value;
+
+        let (major, argument, head) = header(self.bytes)?;
+        // Ciborium's generic Value decoder normalizes small Tag 2/3 bignums
+        // into Integer. Protocol field types and the host's extension policy
+        // must see those tags. Walk only containers/tags here and leave scalar
+        // representation (including floating-point decoding) to ciborium.
+        Ok(match major {
+            4 => {
+                let mut values = Vec::with_capacity(length(argument)?);
+                for item in self.array()? {
+                    values.push(item?.value()?);
+                }
+                Value::Array(values)
+            }
+            5 => {
+                let mut values = Vec::with_capacity(length(argument)?);
+                for entry in self.map()? {
+                    let (key, value) = entry?;
+                    values.push((key.value()?, value.value()?));
+                }
+                Value::Map(values)
+            }
+            6 => Value::Tag(
+                argument,
+                Box::new(
+                    Self {
+                        bytes: &self.bytes[head..],
+                    }
+                    .value()?,
+                ),
+            ),
+            _ => ciborium::from_reader(self.bytes).map_err(|e| error(&e.to_string()))?,
+        })
     }
 }
 

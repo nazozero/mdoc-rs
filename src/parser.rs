@@ -8,7 +8,6 @@ use crate::{
     cbor::raw::{Item, Limits},
     model::*,
 };
-use coset::CborSerializable;
 use std::collections::{HashMap, HashSet};
 
 fn error(message: &str) -> MdocError {
@@ -249,30 +248,57 @@ fn parse_device_signed(value: Item<'_>, limits: Limits) -> Result<DeviceSigned, 
     })
 }
 
-fn validate_cose(value: Item<'_>, limits: Limits) -> Result<(), MdocError> {
+struct CoseFields {
+    protected: coset::ProtectedHeader,
+    unprotected: coset::Header,
+    payload: Option<Vec<u8>>,
+    authentication: Vec<u8>,
+}
+
+fn parse_cose(value: Item<'_>, limits: Limits) -> Result<CoseFields, MdocError> {
     let mut fields = value.array()?;
     if fields.len() != 4 {
         return Err(error("COSE structure must contain four fields"));
     }
     let protected = fields.next().expect("four fields")?.bstr()?;
-    let protected_labels = if protected.is_empty() {
-        0
+    let (protected_labels, protected_header) = if protected.is_empty() {
+        (0, coset::Header::default())
     } else {
         // Protected headers are a bstr, not Tag 24, so validate their map here.
-        crate::cose::raw_header_labels(Item::parse_with_limits(protected, limits)?)?
+        crate::cose::parse_header(Item::parse_with_limits(protected, limits)?)?
     };
-    let unprotected_labels = crate::cose::raw_header_labels(fields.next().expect("four fields")?)?;
+    let (unprotected_labels, unprotected) =
+        crate::cose::parse_header(fields.next().expect("four fields")?)?;
     if protected_labels & unprotected_labels != 0 {
         return Err(MdocError::Cose(
             "duplicate header across protected/unprotected buckets".into(),
         ));
     }
-    Ok(())
+    let payload = fields.next().expect("four fields")?;
+    let payload = if payload.bytes() == [0xf6] {
+        None
+    } else {
+        Some(payload.bstr()?.to_vec())
+    };
+    Ok(CoseFields {
+        protected: coset::ProtectedHeader {
+            original_data: Some(protected.to_vec()),
+            header: protected_header,
+        },
+        unprotected,
+        payload,
+        authentication: fields.next().expect("four fields")?.bstr()?.to_vec(),
+    })
 }
 
 fn parse_sign1(value: Item<'_>, limits: Limits) -> Result<coset::CoseSign1, MdocError> {
-    validate_cose(value, limits)?;
-    coset::CoseSign1::from_slice(value.bytes()).map_err(Into::into)
+    let fields = parse_cose(value, limits)?;
+    Ok(coset::CoseSign1 {
+        protected: fields.protected,
+        unprotected: fields.unprotected,
+        payload: fields.payload,
+        signature: fields.authentication,
+    })
 }
 
 fn parse_device_auth(value: Item<'_>, limits: Limits) -> Result<DeviceAuth, MdocError> {
@@ -284,8 +310,13 @@ fn parse_device_auth(value: Item<'_>, limits: Limits) -> Result<DeviceAuth, Mdoc
     match key.text()? {
         "deviceSignature" => Ok(DeviceAuth::Signature(parse_sign1(value, limits)?)),
         "deviceMac" => {
-            validate_cose(value, limits)?;
-            Ok(DeviceAuth::Mac(coset::CoseMac0::from_slice(value.bytes())?))
+            let fields = parse_cose(value, limits)?;
+            Ok(DeviceAuth::Mac(coset::CoseMac0 {
+                protected: fields.protected,
+                unprotected: fields.unprotected,
+                payload: fields.payload,
+                tag: fields.authentication,
+            }))
         }
         _ => Err(error("unsupported device authentication mechanism")),
     }

@@ -90,7 +90,10 @@ namespace and schema; the generic builder never infers schema from attribute nam
 - CBOR: definite lengths, shortest integer/length encodings, no duplicate keys
   or trailing items, valid UTF-8, bounded embedded Tag 24 items. Protocol map
   keys are integers/text/byte strings; compound and floating-point keys are
-  rejected. Input map order is preserved; issuance uses core deterministic CBOR.
+  rejected. Tags are preserved even for small bignums; protocol integer fields
+  require native integers. Undefined and unsupported simple values are rejected.
+  Input map order is preserved; issuance uses core deterministic CBOR, requiring
+  preferred bignum representation without rewriting opaque Tag 24 contents.
 - Default limits: 1 MiB input, depth 32, 65,536 items per decoded CBOR envelope,
   4,096 entries per collection, at most 16 documents for generic parsing.
   Embedded Tag 24 shares its envelope budget; opaque COSE protected headers and
