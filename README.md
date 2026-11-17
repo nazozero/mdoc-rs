@@ -153,10 +153,10 @@ and property-based malformed-input tests. See the benchmark's methodology for
 comparison scope; strict parsing and new security checks are measured rather
 than described as free or allocation-free.
 
-The [2026-11-17 historical validation checkpoint](docs/validation-2026-11-17.md)
-records exact runtime revisions, CI, advisory findings and measured performance,
-including regressions and comparison limits. Its measurements describe the named
-checkpoint; subsequent runtime changes require their own validation evidence.
+The [validation record](docs/validation-2026-11-17.md) identifies the exact tested
+runtime, CI results, advisory findings and measured performance, including
+regressions and comparison limits. It separately retains the scope of historical
+checkpoints; earlier test results do not stand in for current runtime evidence.
 
 ## Authorship, maintenance and source
 
