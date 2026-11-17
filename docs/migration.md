@@ -58,6 +58,33 @@ must not map a leap second to the preceding ordinary second for a trust decision
 `truncate_to_second` removes subsecond precision while preserving the leap marker.
 This type is an mdoc UTC instant, not a general time-zone or duration library.
 
+## Historical issuer outputs require inventory before rollout
+
+The production baseline generated digest IDs across the full `u32` range in
+`src/builder.rs::next_random_digest_id`. ISO/IEC 18013-5:2021 §9.1.2.4
+(printed page 51; page 57 of the
+[public IBR copy](https://law.resource.org/pub/us/cfr/ibr/inc/iec/iec.18013-5.2021.pdf))
+requires values below `2^31`. This core enforces that limit in every MSO digest
+map and disclosed item. The CDDL's `uint` does not remove the additional bound
+in the normative prose.
+
+Actual native NazoAuth SignerPort cross-version testing produced an unchanged
+baseline credential with digest ID `3547419284`. The baseline accepted its own
+output; this core correctly rejected it. This is a compatibility cost of fixing
+historical issuance, not a reason to weaken the new validation rule. Successful
+cross-version tests on naturally generated in-range credentials do not establish
+compatibility with all historical output. A synthetic sample is not an inventory
+of credentials already issued in production.
+
+Inventory existing credentials before rollout and arrange authorized reissuance
+for those containing out-of-range IDs. Omitting the corresponding disclosure
+does not remove its signed MSO entry. Editing an ID or re-encoding signed data
+cannot repair a credential: item digests and the MSO must be rebuilt and signed
+again through the authorized issuance path. Do not add a verifier bypass or
+silently accept the old range during migration. Other strict profile checks may
+also reject historical malformed inputs; test the actual credential population
+against the chosen profile before admitting it to the new production path.
+
 ## Security checks transferred to the host
 
 A successful `PendingTrustDocument` guarantees issuer/holder cryptographic
