@@ -38,8 +38,11 @@ completed all four jobs successfully: Rust, targets, fuzz and advisories.
 * All-features executed 187 tests; no-default-features executed 128. The production
   baseline executed 49 issue-feature and 63 all-feature tests. Some old ISO test
   files were gated by TSP and executed no tests in the production configuration.
-* `wasm32-unknown-unknown` minimum and issue plus `wasm-js`, and `wasm32-wasip2`
-  issue builds passed. Native all-features is not evidence of a WASM build.
+* The runtime CI executed successful `cargo check` for `wasm32-unknown-unknown`
+  minimum and issue plus `wasm-js`, and `wasm32-wasip2` issue. These are cross-target
+  checks, not linked/running WASM programs. The follow-up workflow additionally
+  requires explicit native and WASM `cargo build`; its job results must be
+  recorded separately instead of reclassifying the earlier check logs.
 * The final seeded CI fuzz campaign completed **444,990 runs in 121 seconds**,
   with successful process exit and ASan/LSan enabled. It reaches bounded CBOR,
   COSE, MSO, issued/presentation verification, Timestamp and FullDate. This
