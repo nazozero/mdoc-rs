@@ -37,6 +37,7 @@ Earlier drafts and old test fixtures do not override them.
 | COSE X.509 headers | [RFC 9360](https://www.rfc-editor.org/rfc/rfc9360.html), §§2–3 | Supplemental review. ISO 2021's unprotected `x5chain` profile predates this final RFC; see the compatibility boundary below. |
 | CBOR | [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html), §§3.4.5.1, 4, 5.6, 10 | Data validity, embedded CBOR, encoding profiles and resource limits. Generic validity and a chosen deterministic encoding are distinct. |
 | Date tags | [RFC 8943](https://www.rfc-editor.org/rfc/rfc8943.html); [RFC 9581](https://www.rfc-editor.org/rfc/rfc9581.html) | Tag 1004 is full-date and Tag 100 is epoch-date. Extended time/period tags do not replace the MSO's Tag 0 profile. Values remain typed CBOR for application schemas. |
+| UTC representation and maintenance | [RFC 3339 §§5.6–5.7](https://www.rfc-editor.org/rfc/rfc3339.html); [time 0.3.55 source](https://docs.rs/time/0.3.55/src/time/parsing/parsable.rs.html); [RUSTSEC-2026-0543](https://github.com/rustsec/advisory-db/blob/main/crates/chrono/RUSTSEC-2026-0543.md) | Chrono was removed from the core and its tests after the all-versions maintenance advisory. `Timestamp` delegates calendar/format validation to `time` while preserving whole leap seconds and rejecting precision-losing input. See the timestamp boundary below. |
 | URI syntax | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986.html); [iri-string `UriStr`](https://docs.rs/iri-string/latest/iri_string/types/type.UriStr.html) | Borrowed URI syntax validation. Syntax acceptance does not authorize fetching a target. |
 | Token Status List | [draft-ietf-oauth-status-list-21](https://www.ietf.org/archive/id/draft-ietf-oauth-status-list-21.html); [IETF history](https://datatracker.ietf.org/doc/draft-ietf-oauth-status-list/history/) | Revision 21, dated 2026-06-21, remains the compatibility baseline. Latest recorded RPC update at review: 2026-11-12, “Awaiting Second editor”. Still in the RFC Editor queue, not a published RFC. |
 
@@ -79,7 +80,9 @@ rather than a concrete test name remain release-evidence work for that owner.
 | MSO-02 | ISO §9.1.2.4; required | Require Tag 24; decode borrowed inner bytes once. | `IssuerAuth::mso` | `mso_requires_exactly_one_tag24_embedded_map`; `parser_security::present_mso_payload_must_be_one_tag24_wrapped_map`; `mso_security::original_mso_bytes_and_unsorted_map_order_are_preserved` |
 | MSO-03 | ISO §§9.1.2.4–9.1.2.5; required | Digest name/length and `0 <= digestID < 2^31` checked together. | `parse_value_digests` | `digest_algorithms_and_output_lengths_are_bound`; `digest_identifiers_and_namespace_shapes_are_strict`; `digest_id_range_boundary_is_enforced` |
 | MSO-04 | ISO §9.1.2.4; required | Tag 0, UTC `Z`, whole seconds; `signed <= validFrom < validUntil`. | `parse_datetime`; `ValidityInfo::validate` | `timestamp_tag_and_iso_utc_whole_second_profile_are_required`; `validity_order_and_required_members_are_enforced` |
-| TIME-01 | RFC 3339 / MSO precision and certificate ordering; required | Maintained time backend, explicit whole leap seconds, uppercase T, no silent fractional truncation or Unix projection of leap seconds; four-digit UTC range. | `src/time.rs::Timestamp` | `time::tests::leap_second_has_exact_order_beyond_the_last_ordinary_nanosecond`; `utc_normalization_retains_leap_seconds_and_ordinary_fractional_precision`; `calendar_and_unsupported_leap_inputs_fail_closed`; `unix_conversion_preserves_negative_and_subsecond_instants`; `utc_offsets_preserve_identity_and_four_digit_year_bounds_are_checked`; `iso_boundaries::whole_leap_second_is_not_truncated_to_the_certificate_last_regular_second` |
+| TIME-01 | RFC 3339 §§5.6–5.7; required precision boundary | A whole second labelled `60` remains distinct: ordinary `59.999999999 < 60 < next second`. Unix conversion returns `None` for leap seconds. No self-written calendar or timezone rules. | `src/time.rs::Timestamp`; `src/verifier.rs` | Unit `leap_second_has_exact_order_beyond_the_last_ordinary_nanosecond`; `utc_normalization_retains_leap_seconds_and_ordinary_fractional_precision`; `iso_boundaries::whole_leap_second_is_not_truncated_to_the_certificate_last_regular_second` |
+| TIME-02 | Selected API/encoding profile; required | Require uppercase `T`; MSO requires exactly 20-byte UTC `Z` form. General issuance input has at most nine fractional digits; longer input rejects before any interval comparison. Fractional leap seconds reject. | `src/time.rs`; MSO parser; builder | Unit `calendar_and_unsupported_leap_inputs_fail_closed`; `roundtrip_test::normalization_cannot_hide_reversed_order_or_create_an_empty_interval`; `subsecond_clock_input_is_normalized_only_after_order_validation` |
+| TIME-03 | Range/conversion integrity; required | Four-digit UTC years, exact ordinary nanoseconds, checked offset conversion and consistent equality/order/hash. No silent projection of leap seconds into POSIX time. | `src/time.rs` | Unit `unix_conversion_preserves_negative_and_subsecond_instants`; `utc_offsets_preserve_identity_and_four_digit_year_bounds_are_checked` |
 | MSO-05 | ISO §9.1.2.4; required when present | Nonempty, typed, disjoint KeyAuthorizations; no filtering malformed items. | `parse_key_authorizations` | `key_authorizations_preserve_both_disjoint_forms`; `malformed_or_overlapping_key_authorizations_are_rejected_without_filtering` |
 | MSO-06 | Extension boundary; required | Preserve MSO/DeviceKeyInfo extensions and integer keyInfo for explicit policy; protocol verifier rejects unsupported extensions. Unknown validity/authorization semantics reject. | `src/model/types.rs`; MSO parser; `src/verifier.rs` | `device_key_is_required_and_information_extensions_are_preserved`; `iso_boundaries::unknown_authenticated_device_key_information_requires_explicit_profile_support`; `verifier_test::unauthenticated_future_mso_extension_is_not_silently_dropped` (the test re-signs the modified MSO); `validity_order_and_required_members_are_enforced`; `malformed_or_overlapping_key_authorizations_are_rejected_without_filtering` |
 | ITEMS-01 | ISO §9.1.2.5; required | Hash received IssuerSignedItemBytes; require random salts of at least 16 bytes without reuse and authenticated namespace/digest references. | `src/model/issuer_signed_item.rs`; parser/verifier | `interop_test::annex_d_original_bytes_digests_and_issuer_signature`; `verifier_test::tampered_attribute_original_bytes_fail_digest`; `iso_boundaries::received_short_random_is_rejected_even_with_matching_authenticated_digests`; `received_random_reuse_is_rejected_within_and_across_namespaces`; `disclosed_namespace_and_digest_id_must_exist_in_the_authenticated_mso` |
@@ -101,6 +104,34 @@ The old parser accepted Tag 1 epoch time in MSO ValidityInfo. The current test
 explicitly rejects it because this profile uses Tag 0. This is a deliberate
 acceptance-boundary correction. Empty `docType` is also rejected as an application
 profile restriction, not because generic `tstr` grammar alone forbids it.
+
+### Timestamp boundary and advisory update
+
+The Chrono maintenance advisory was merged through
+[RustSec PR 3214](https://github.com/rustsec/advisory-db/pull/3214) on the review
+date. It is an all-versions **unmaintained** advisory, not a report of a newly
+demonstrated memory-safety vulnerability in this core. Earlier audit evidence
+against the 1,509-advisory snapshot does not override a later database finding.
+The core, its test dependencies and the candidate consumer now use `time`
+instead; historical baseline benchmark graphs retain their original dependency.
+Removing the core dependency does not remediate every host workspace dependency.
+
+`time` is responsible for the calendar and RFC 3339 offset interpretation. Its
+parser's permitted separators, leap-second stand-in and excess fractional digits
+are broader or lossy relative to this protocol's needs. The small `Timestamp`
+type therefore checks the bounded input precision/separator first, retains a
+separate whole-leap-second flag and orders it after every nanosecond of the
+preceding regular second. Formatting restores the original `60` label. Signed
+MSO payload bytes are still retained unchanged and never replaced with that
+formatted value during authentication. The type does not implement calendar
+arithmetic or claim to validate a leap occurrence against an IERS schedule.
+
+Uppercase `T`, whole MSO seconds and rejection of fractional leap seconds are
+explicit acceptance-profile choices. Borrowing `time`'s clamped result directly
+would not establish the same representation and ordering contract. Comparison,
+certificate boundaries, issuer normalization and date tags are re-tested after
+this dependency change; older performance/artifact data must remain labelled
+with its earlier runtime revision.
 
 COSE empty-header regressions make the admission boundary explicit. The pinned
 production dependency, coset 0.4.2, already rejects empty `kid`, IV, partial-IV

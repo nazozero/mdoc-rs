@@ -91,8 +91,10 @@ namespace and schema; the generic builder never infers schema from attribute nam
   or trailing items, valid UTF-8, bounded embedded Tag 24 items. Protocol map
   keys are integers/text/byte strings; compound and floating-point keys are
   rejected. Input map order is preserved; issuance uses core deterministic CBOR.
-- Default limits: 1 MiB input, depth 32, 65,536 total items, 4,096 entries per
-  collection, at most 16 documents for generic parsing. `parse_with_limits`
+- Default limits: 1 MiB input, depth 32, 65,536 items per decoded CBOR envelope,
+  4,096 entries per collection, at most 16 documents for generic parsing.
+  Embedded Tag 24 shares its envelope budget; opaque COSE protected headers and
+  MSO payloads are checked separately with the same limits. `parse_with_limits`
   accepts explicit limits; HAIP verification sets `max_documents: 1`.
 - Presentation authentication requires a holder signature. DeviceMAC is an
   explicit HMAC primitive using an externally derived key, not enabled by the
@@ -136,6 +138,10 @@ Redirect/DC API example vectors, external signing round trips, mutation tests
 and property-based malformed-input tests. See the benchmark's methodology for
 comparison scope; strict parsing and new security checks are measured rather
 than described as free or allocation-free.
+
+The [2026-11-17 validation checkpoint](docs/validation-2026-11-17.md) records
+exact runtime revisions, CI, advisory findings and measured performance,
+including regressions and comparison limits.
 
 ## License and source
 
