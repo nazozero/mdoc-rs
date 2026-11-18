@@ -1,0 +1,17 @@
+[package]
+name = "mdoc-baseline-minimal-consumer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+license = "BSD-2-Clause"
+
+[workspace]
+
+[dependencies]
+mdoc = { package = "mdoc-rs", git = "https://github.com/nazozero/mdoc-rs", rev = "9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc", default-features = false, features = ["issue"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

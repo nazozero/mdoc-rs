@@ -1,4 +1,4 @@
-//! Error types for the mdoc-rs crate.
+//! Error types for the nazo-mdoc protocol core.
 
 use thiserror::Error;
 
@@ -53,10 +53,9 @@ pub enum MdocError {
     #[error("validity error: {0}")]
     Validity(String),
 
-    /// Trust store / chain verification error.
-    #[cfg(feature = "tsp")]
-    #[error("trust error: {0}")]
-    Trust(#[from] tsp_ltv::error::TrustError),
+    /// A presentation cannot be safely attributed to the requested document.
+    #[error("DeviceResponse has {actual} documents; policy permits 1..={max}")]
+    DocumentCount { actual: usize, max: usize },
 
     /// Unsupported algorithm.
     #[error("unsupported algorithm: {0}")]

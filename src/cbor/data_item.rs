@@ -23,30 +23,42 @@ pub fn encode_cbor(value: &Value) -> Result<Vec<u8>, MdocError> {
 
 /// Encode a value to **deterministic (canonical) CBOR** bytes.
 ///
-/// ISO/IEC 18013-5 §9.1.2.5 requires the CBOR deterministic encoding for
-/// issuance output (the MSO, each `IssuerSignedItem`, and `valueDigests`).
+/// This crate emits RFC 8949 core deterministic encoding for issuance.
+/// ISO 18013-5's shortest-form/definite-length rules do not require map sorting;
+/// readers therefore preserve and authenticate the received map order.
 /// `ciborium` already emits definite-length items and shortest-form integers,
 /// but it does **not** sort map keys. This wrapper recursively reorders every
 /// map's entries into the RFC 8949 §4.2.1 canonical order (by the bytewise
 /// lexicographic order of the *encoded* keys), so the output is stable across
 /// runs regardless of the source `HashMap` iteration order.
+///
+/// Tag 2/3 inputs must already use preferred bignum representation: a nonempty
+/// byte string longer than eight bytes with no leading zero. Smaller numbers
+/// must be supplied as native integers instead of silently removing a tag.
+/// This operates on the explicit Value tree; pre-encoded Tag 24 contents remain
+/// byte strings, and unknown tags have no inferred semantic normalization.
 pub fn encode_cbor_canonical(value: &Value) -> Result<Vec<u8>, MdocError> {
-    let canonical = canonicalize(value)?;
-    encode_cbor(&canonical)
+    let canonical = canonicalize(value, 0)?;
+    let bytes = encode_cbor(&canonical)?;
+    crate::cbor::raw::validate(&bytes)?;
+    Ok(bytes)
 }
 
 /// Recursively rewrite a CBOR value into canonical form: every map's entries are
 /// sorted by the encoded bytes of their (already-canonicalized) keys, per
 /// RFC 8949 §4.2.1. Arrays and tag contents are canonicalized in place; scalars
 /// are returned unchanged.
-fn canonicalize(value: &Value) -> Result<Value, MdocError> {
+fn canonicalize(value: &Value, depth: usize) -> Result<Value, MdocError> {
+    if depth > crate::cbor::raw::Limits::default().max_depth {
+        return Err(MdocError::Cbor("CBOR nesting limit exceeded".into()));
+    }
     Ok(match value {
         Value::Map(entries) => {
             // Canonicalize each key/value, encode the key, and sort by key bytes.
             let mut keyed: Vec<(Vec<u8>, Value, Value)> = Vec::with_capacity(entries.len());
             for (k, v) in entries {
-                let ck = canonicalize(k)?;
-                let cv = canonicalize(v)?;
+                let ck = canonicalize(k, depth + 1)?;
+                let cv = canonicalize(v, depth + 1)?;
                 let key_bytes = encode_cbor(&ck)?;
                 keyed.push((key_bytes, ck, cv));
             }
@@ -56,18 +68,31 @@ fn canonicalize(value: &Value) -> Result<Value, MdocError> {
         Value::Array(items) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
-                out.push(canonicalize(item)?);
+                out.push(canonicalize(item, depth + 1)?);
             }
             Value::Array(out)
         }
-        Value::Tag(tag, inner) => Value::Tag(*tag, Box::new(canonicalize(inner)?)),
+        Value::Tag(tag @ (2 | 3), inner) => {
+            let Value::Bytes(magnitude) = inner.as_ref() else {
+                return Err(MdocError::Cbor("bignum tag must contain bytes".into()));
+            };
+            if magnitude.len() <= 8 || magnitude[0] == 0 {
+                return Err(MdocError::Cbor(
+                    "bignum must use preferred encoding; use a native integer for small values"
+                        .into(),
+                ));
+            }
+            Value::Tag(*tag, Box::new(canonicalize(inner, depth + 1)?))
+        }
+        Value::Tag(tag, inner) => Value::Tag(*tag, Box::new(canonicalize(inner, depth + 1)?)),
         other => other.clone(),
     })
 }
 
-/// Decode CBOR bytes to a value.
+/// Decode bounded CBOR bytes, preserving tags rather than normalizing tagged
+/// bignums into untagged integers. Unsupported simple values fail closed.
 pub fn decode_cbor(bytes: &[u8]) -> Result<Value, MdocError> {
-    ciborium::from_reader(bytes).map_err(|e| MdocError::Cbor(e.to_string()))
+    crate::cbor::raw::Item::parse(bytes)?.value()
 }
 
 /// Wrap bytes in CBOR Tag 24 (encoded CBOR data item).
@@ -84,14 +109,7 @@ pub fn unwrap_tag24(value: &Value) -> Result<Vec<u8>, MdocError> {
                 "Tag 24 inner value is not bytes".to_string(),
             )),
         },
-        Value::Bytes(bytes) => {
-            // Some implementations omit the tag and just use raw bytes
-            Ok(bytes.clone())
-        }
-        _ => Err(MdocError::Cbor(format!(
-            "expected Tag 24 or bytes, got {:?}",
-            value
-        ))),
+        _ => Err(MdocError::Cbor(format!("expected Tag 24, got {:?}", value))),
     }
 }
 
@@ -131,13 +149,12 @@ mod tests {
     fn unwrap_plain_bytes() {
         // Some impls omit tag 24 and just use raw bytes
         let val = Value::Bytes(b"raw bytes".to_vec());
-        let result = unwrap_tag24(&val).unwrap();
-        assert_eq!(result, b"raw bytes");
+        assert!(unwrap_tag24(&val).is_err());
     }
 
     #[test]
     fn canonical_sorts_map_keys_by_encoded_bytes() {
-        // RFC 8949 §4.2.1: keys sort by encoded length first, then lexicographically.
+        // RFC 8949 §4.2.1: keys sort lexicographically by their encoded bytes.
         // Text-key encoding is major-type-3 + length, so shorter keys sort first.
         let map = Value::Map(vec![
             (
@@ -201,5 +218,51 @@ mod tests {
             .map(|(k, _)| k.as_text().unwrap().to_string())
             .collect();
         assert_eq!(keys, vec!["a", "zz"]);
+    }
+
+    #[test]
+    fn canonical_bignum_inputs_must_already_use_preferred_representation() {
+        for tag in [2, 3] {
+            for inner in [
+                Value::Bytes(vec![]),
+                Value::Bytes(vec![1]),
+                Value::Bytes(vec![0xff; 8]),
+                Value::Bytes(vec![0; 9]),
+                Value::Bytes([vec![0], vec![0xff; 9]].concat()),
+                Value::Text("18446744073709551616".into()),
+            ] {
+                let value = Value::Tag(tag, Box::new(inner));
+                for nested in [
+                    value.clone(),
+                    Value::Array(vec![value.clone()]),
+                    Value::Map(vec![("number".into(), value)]),
+                ] {
+                    assert!(encode_cbor_canonical(&nested).is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_integer_boundaries_preserve_native_and_large_bignum_types() {
+        for (value, expected) in [
+            (Value::Integer(u64::MAX.into()), "1bffffffffffffffff"),
+            (
+                Value::Integer((-(1i128 << 64)).try_into().unwrap()),
+                "3bffffffffffffffff",
+            ),
+            (
+                Value::Tag(2, Box::new(Value::Bytes([vec![1], vec![0; 8]].concat()))),
+                "c249010000000000000000",
+            ),
+            (
+                Value::Tag(3, Box::new(Value::Bytes([vec![1], vec![0; 8]].concat()))),
+                "c349010000000000000000",
+            ),
+        ] {
+            let wire = encode_cbor_canonical(&value).unwrap();
+            assert_eq!(wire, hex::decode(expected).unwrap());
+            assert_eq!(decode_cbor(&wire).unwrap(), value);
+        }
     }
 }

@@ -1,304 +1,167 @@
-//! DeviceResponse builder for presentations (feature: `issue`).
+//! Prepare device authentication for an external signer.
+//!
+//! Private keys, ECDH, signer selection and request authorization belong to the
+//! host. This module prepares the exact COSE Sig_structure, then verifies the
+//! returned signature against the MSO device public key before assembling a
+//! detached `DeviceSignature`. It does not establish issuer trust.
 
 use std::collections::HashMap;
 
-use crate::cbor::data_item;
+use coset::{CborSerializable, CoseKey, CoseSign1, Header, HeaderBuilder, ProtectedHeader};
+
+use crate::cbor::raw;
+use crate::cose::{validate_verification_key, verify_cose_signature};
 use crate::error::MdocError;
 use crate::model::document::{DeviceSigned, IssuerSignedDocument};
-use crate::model::mdoc::{MDoc, MDocStatus};
 use crate::model::types::DeviceAuth;
-use crate::session::{self, SessionTranscript};
+use crate::session::{SessionTranscript, build_device_authentication_validated};
 
-/// Builder for creating device response presentations with selective disclosure.
-pub struct DeviceResponseBuilder {
-    documents: Vec<IssuerSignedDocument>,
-    session_transcript: Option<SessionTranscript>,
-    device_name_spaces: HashMap<String, HashMap<String, ciborium::Value>>,
-    auth_method: Option<DeviceAuthMethod>,
-}
-
-enum DeviceAuthMethod {
-    Signature {
-        device_key_der: Vec<u8>,
-        algorithm: i64,
-    },
-    Mac {
-        device_key_der: Vec<u8>,
-        reader_pub_key_der: Vec<u8>,
-    },
-}
-
-impl DeviceResponseBuilder {
-    /// Create a builder from existing issuer-signed documents.
-    pub fn from_documents(documents: Vec<IssuerSignedDocument>) -> Self {
-        Self {
-            documents,
-            session_transcript: None,
-            device_name_spaces: HashMap::new(),
-            auth_method: None,
-        }
-    }
-
-    /// Set the session transcript.
-    pub fn session_transcript(mut self, transcript: SessionTranscript) -> Self {
-        self.session_transcript = Some(transcript);
-        self
-    }
-
-    /// Add device-provided attributes.
-    pub fn add_device_namespace(
-        mut self,
-        namespace: &str,
-        data: HashMap<String, ciborium::Value>,
-    ) -> Self {
-        self.device_name_spaces.insert(namespace.to_string(), data);
-        self
-    }
-
-    /// Authenticate with a device signature (COSE_Sign1).
-    pub fn authenticate_with_signature(
-        mut self,
-        device_key_der: Vec<u8>,
-        cose_algorithm: i64,
-    ) -> Self {
-        self.auth_method = Some(DeviceAuthMethod::Signature {
-            device_key_der,
-            algorithm: cose_algorithm,
-        });
-        self
-    }
-
-    /// Authenticate with a MAC (COSE_Mac0 via ECDH).
-    pub fn authenticate_with_mac(
-        mut self,
-        device_key_der: Vec<u8>,
-        reader_pub_key_der: Vec<u8>,
-    ) -> Self {
-        self.auth_method = Some(DeviceAuthMethod::Mac {
-            device_key_der,
-            reader_pub_key_der,
-        });
-        self
-    }
-
-    /// Build the device response.
-    pub fn build(self) -> Result<MDoc, MdocError> {
-        let transcript = self
-            .session_transcript
-            .ok_or_else(|| MdocError::Issuance("missing session transcript".to_string()))?;
-
-        let auth = self
-            .auth_method
-            .ok_or_else(|| MdocError::Issuance("missing authentication method".to_string()))?;
-
-        let transcript_bytes = transcript.to_cbor_bytes()?;
-
-        let mut result_documents = Vec::new();
-
-        for mut doc in self.documents {
-            // Build DeviceNameSpaces CBOR
-            let device_ns_cbor = if self.device_name_spaces.is_empty() {
-                ciborium::Value::Map(vec![])
-            } else {
-                let entries: Vec<(ciborium::Value, ciborium::Value)> = self
-                    .device_name_spaces
-                    .iter()
-                    .map(|(ns, elems)| {
-                        let elem_entries: Vec<(ciborium::Value, ciborium::Value)> = elems
-                            .iter()
-                            .map(|(k, v)| (ciborium::Value::Text(k.clone()), v.clone()))
-                            .collect();
-                        (
-                            ciborium::Value::Text(ns.clone()),
-                            ciborium::Value::Map(elem_entries),
-                        )
-                    })
-                    .collect();
-                ciborium::Value::Map(entries)
-            };
-
-            let device_ns_bytes = data_item::encode_cbor(&device_ns_cbor)?;
-
-            // Build DeviceAuthentication bytes
-            let device_auth_bytes = session::build_device_authentication_bytes(
-                &transcript_bytes,
-                &doc.doc_type,
-                &device_ns_bytes,
-            )?;
-
-            // Create the device authentication
-            let device_auth = match &auth {
-                DeviceAuthMethod::Signature {
-                    device_key_der,
-                    algorithm,
-                } => build_device_signature(device_key_der, *algorithm, &device_auth_bytes)?,
-                DeviceAuthMethod::Mac {
-                    device_key_der,
-                    reader_pub_key_der,
-                } => build_device_mac(
-                    device_key_der,
-                    reader_pub_key_der,
-                    &transcript_bytes,
-                    &device_auth_bytes,
-                )?,
-            };
-
-            doc.device_signed = Some(DeviceSigned {
-                device_auth,
-                name_spaces: self.device_name_spaces.clone(),
-                // Preserve the exact inner DeviceNameSpaces bytes used to build
-                // DeviceAuthentication, so a later verifier reconstructs the
-                // identical signed/MAC'd structure.
-                name_spaces_bytes: device_ns_bytes.clone(),
-            });
-
-            result_documents.push(doc);
-        }
-
-        Ok(MDoc {
-            version: "1.0".to_string(),
-            status: MDocStatus::Ok,
-            documents: result_documents,
-        })
-    }
-}
-
-/// Create a COSE_Sign1 device signature over DeviceAuthentication.
-fn build_device_signature(
-    device_key_der: &[u8],
+/// A device-signature operation awaiting an externally produced signature.
+///
+/// The private fields retain the exact signing input and the document to which
+/// it belongs. There is no private-key parameter or signer trait in the core.
+#[derive(Debug)]
+#[must_use = "send signing_input to the holder's signer and complete with finish"]
+pub struct PreparedDeviceAuthentication {
+    document: IssuerSignedDocument,
+    name_spaces: HashMap<String, HashMap<String, ciborium::Value>>,
+    name_spaces_bytes: Vec<u8>,
+    protected: ProtectedHeader,
+    signing_input: Vec<u8>,
+    device_key: CoseKey,
     algorithm: i64,
-    device_auth_bytes: &[u8],
-) -> Result<DeviceAuth, MdocError> {
-    use crate::cose::key::algorithms;
-    use coset::iana;
+}
 
-    let alg = match algorithm {
-        algorithms::ES256 => iana::Algorithm::ES256,
-        algorithms::ES384 => iana::Algorithm::ES384,
-        algorithms::EDDSA => iana::Algorithm::EdDSA,
-        other => {
-            return Err(MdocError::Issuance(format!(
-                "unsupported device auth algorithm: {other}"
+/// Prepare a holder signature for one document and the supplied transcript.
+///
+/// `device_name_spaces_bytes` is the complete original
+/// `DeviceNameSpacesBytes = #6.24(bstr .cbor DeviceNameSpaces)` value. It is
+/// decoded once to check its model and the MSO's KeyAuthorizations. The original
+/// bytes are retained for the proof and presentation. Empty namespaces can be
+/// represented as `[0xd8, 0x18, 0x41, 0xa0]`.
+///
+/// The caller must authorize the request and obtain this document from a source
+/// whose issuer trust has been established. Preparing a proof does not verify
+/// the issuer signature or credential status. An existing device proof, if any,
+/// is replaced only after the new signature passes verification in `finish`.
+pub fn prepare_device_authentication(
+    document: IssuerSignedDocument,
+    transcript: &SessionTranscript<'_>,
+    device_name_spaces_bytes: Vec<u8>,
+    algorithm: i64,
+) -> Result<PreparedDeviceAuthentication, MdocError> {
+    let assigned_algorithm = match algorithm {
+        -7 => coset::iana::Algorithm::ES256,
+        -35 => coset::iana::Algorithm::ES384,
+        -36 => coset::iana::Algorithm::ES512,
+        -8 => coset::iana::Algorithm::EdDSA,
+        _ => {
+            return Err(MdocError::UnsupportedAlgorithm(format!(
+                "device signature algorithm {algorithm}"
             )));
         }
     };
-
-    let protected = coset::HeaderBuilder::new().algorithm(alg).build();
-
-    // Sign with device private key
-    let signature = sign_with_device_key(device_key_der, algorithm, device_auth_bytes)?;
-
-    // Build COSE_Sign1 with detached payload (payload = None)
-    let sign1 = coset::CoseSign1Builder::new()
-        .protected(protected)
-        .payload(device_auth_bytes.to_vec())
-        .signature(signature)
-        .build();
-
-    Ok(DeviceAuth::Signature(sign1))
-}
-
-/// Create a COSE_Mac0 device MAC using ECDH-derived ephemeral key.
-fn build_device_mac(
-    device_key_der: &[u8],
-    reader_pub_key_der: &[u8],
-    transcript_bytes: &[u8],
-    device_auth_bytes: &[u8],
-) -> Result<DeviceAuth, MdocError> {
-    use coset::iana;
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
-
-    // Derive shared secret via ECDH
-    let shared_secret = ecdh_shared_secret(device_key_der, reader_pub_key_der)?;
-
-    // Derive ephemeral MAC key
-    let mac_key = session::derive_ephemeral_mac_key(&shared_secret, transcript_bytes)?;
-
-    let protected = coset::HeaderBuilder::new()
-        .algorithm(iana::Algorithm::HMAC_256_256)
-        .build();
-
-    // Build MAC structure
-    let mac_structure = coset::mac_structure_data(
-        coset::MacContext::CoseMac0,
-        coset::ProtectedHeader {
-            original_data: None,
-            header: protected.clone(),
-        },
-        &[],
-        device_auth_bytes,
+    let mso = document.issuer_signed.issuer_auth.mso()?;
+    if mso.doc_type != document.doc_type {
+        return Err(MdocError::Mso("document docType differs from MSO".into()));
+    }
+    validate_verification_key(&mso.device_key_info.device_key, algorithm)?;
+    let name_spaces = decode_namespaces(&device_name_spaces_bytes)?;
+    crate::verifier::check_key_authorizations(&mso.device_key_info, &name_spaces)?;
+    let payload = build_device_authentication_validated(
+        transcript,
+        &document.doc_type,
+        &device_name_spaces_bytes,
     );
-
-    // Compute HMAC-SHA256
-    let mut hmac = Hmac::<Sha256>::new_from_slice(&mac_key)
-        .map_err(|e| MdocError::Issuance(format!("HMAC init: {e}")))?;
-    hmac.update(&mac_structure);
-    let tag = hmac.finalize().into_bytes().to_vec();
-
-    let mac0 = coset::CoseMac0Builder::new()
-        .protected(protected)
-        .payload(device_auth_bytes.to_vec())
-        .tag(tag)
-        .build();
-
-    Ok(DeviceAuth::Mac(mac0))
+    let header = HeaderBuilder::new().algorithm(assigned_algorithm).build();
+    let protected = ProtectedHeader {
+        original_data: Some(header.clone().to_vec()?),
+        header,
+    };
+    let signing_input = coset::sig_structure_data(
+        coset::SignatureContext::CoseSign1,
+        protected.clone(),
+        None,
+        &[],
+        &payload,
+    );
+    Ok(PreparedDeviceAuthentication {
+        document,
+        name_spaces,
+        name_spaces_bytes: device_name_spaces_bytes,
+        protected,
+        signing_input,
+        device_key: mso.device_key_info.device_key,
+        algorithm,
+    })
 }
 
-/// Sign data with a device private key (ES256/ES384/EdDSA).
-fn sign_with_device_key(key_der: &[u8], algorithm: i64, data: &[u8]) -> Result<Vec<u8>, MdocError> {
-    use crate::cose::key::algorithms;
+impl PreparedDeviceAuthentication {
+    /// Exact COSE Sig_structure bytes to send to the external signer.
+    /// ECDSA signers return fixed-width raw `r || s`, not ASN.1 DER.
+    pub fn signing_input(&self) -> &[u8] {
+        &self.signing_input
+    }
 
-    match algorithm {
-        algorithms::ES256 => {
-            use p256::ecdsa::{Signature, SigningKey};
-            use signature::Signer;
+    /// Protected COSE algorithm of this signing operation.
+    pub fn algorithm(&self) -> i64 {
+        self.algorithm
+    }
 
-            let sk = SigningKey::from_slice(key_der)
-                .map_err(|e| MdocError::Issuance(format!("P-256 signing key: {e}")))?;
-            let sig: Signature = sk
-                .try_sign(data)
-                .map_err(|e| MdocError::Issuance(format!("P-256 sign: {e}")))?;
-            // Return raw r||s format for COSE
-            Ok(sig.to_bytes().to_vec())
+    /// Verify the external signature and attach a detached COSE_Sign1 proof.
+    /// A wrong key, altered input, DER-encoded ECDSA value, or invalid signature
+    /// cannot produce a successfully completed document.
+    pub fn finish(mut self, signature: Vec<u8>) -> Result<IssuerSignedDocument, MdocError> {
+        if !verify_cose_signature(
+            &self.signing_input,
+            &signature,
+            &self.device_key,
+            self.algorithm,
+        )? {
+            return Err(MdocError::Signature(
+                "external holder signature does not match signing input and device key".into(),
+            ));
         }
-        algorithms::ES384 => {
-            use p384::ecdsa::{Signature, SigningKey};
-            use signature::Signer;
-
-            let sk = SigningKey::from_slice(key_der)
-                .map_err(|e| MdocError::Issuance(format!("P-384 signing key: {e}")))?;
-            let sig: Signature = sk
-                .try_sign(data)
-                .map_err(|e| MdocError::Issuance(format!("P-384 sign: {e}")))?;
-            Ok(sig.to_bytes().to_vec())
-        }
-        algorithms::EDDSA => {
-            use ed25519_dalek::{Signer, SigningKey};
-
-            let key_bytes: [u8; 32] = key_der
-                .try_into()
-                .map_err(|_| MdocError::Issuance("Ed25519 key must be 32 bytes".to_string()))?;
-            let sk = SigningKey::from_bytes(&key_bytes);
-            let sig = sk.sign(data);
-            Ok(sig.to_bytes().to_vec())
-        }
-        _ => Err(MdocError::Issuance(format!(
-            "unsupported signing algorithm: {algorithm}"
-        ))),
+        self.document.device_signed = Some(DeviceSigned {
+            device_auth: DeviceAuth::Signature(CoseSign1 {
+                protected: self.protected,
+                unprotected: Header::default(),
+                payload: None,
+                signature,
+            }),
+            name_spaces: self.name_spaces,
+            name_spaces_bytes: self.name_spaces_bytes,
+        });
+        Ok(self.document)
     }
 }
 
-/// Perform ECDH to get shared secret (P-256 only for now).
-fn ecdh_shared_secret(private_key: &[u8], public_key: &[u8]) -> Result<Vec<u8>, MdocError> {
-    use p256::{PublicKey, SecretKey};
-
-    let sk = SecretKey::from_slice(private_key)
-        .map_err(|e| MdocError::Issuance(format!("ECDH private key: {e}")))?;
-
-    let pk = PublicKey::from_sec1_bytes(public_key)
-        .map_err(|e| MdocError::Issuance(format!("ECDH public key: {e}")))?;
-
-    let shared = p256::ecdh::diffie_hellman(sk.to_nonzero_scalar(), pk.as_affine());
-    Ok(shared.raw_secret_bytes().to_vec())
+fn decode_namespaces(
+    encoded: &[u8],
+) -> Result<HashMap<String, HashMap<String, ciborium::Value>>, MdocError> {
+    let namespaces = raw::Item::parse(encoded)?.embedded()?.map()?;
+    let mut decoded = HashMap::new();
+    for namespace in namespaces {
+        let (name, elements) = namespace?;
+        let name = name.text()?;
+        if name.is_empty() {
+            return Err(MdocError::Issuance("empty device namespace".into()));
+        }
+        let mut values = HashMap::new();
+        for element in elements.map()? {
+            let (name, value) = element?;
+            let name = name.text()?;
+            if name.is_empty() {
+                return Err(MdocError::Issuance(
+                    "empty device element identifier".into(),
+                ));
+            }
+            values.insert(name.to_owned(), value.value()?);
+        }
+        if values.is_empty() {
+            return Err(MdocError::Issuance("empty DeviceSignedItems map".into()));
+        }
+        decoded.insert(name.to_owned(), values);
+    }
+    Ok(decoded)
 }

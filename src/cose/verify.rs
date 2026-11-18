@@ -1,6 +1,6 @@
 //! COSE signature verification using RustCrypto.
 
-use crate::cose::key::{algorithms, CoseKeyExt};
+use crate::cose::key::{CoseKeyExt, algorithms};
 use crate::error::MdocError;
 
 /// Verify a COSE signature given the to-be-signed data, signature bytes, and a COSE_Key.
@@ -12,6 +12,7 @@ pub fn verify_cose_signature(
     cose_key: &coset::CoseKey,
     alg_id: i64,
 ) -> Result<bool, MdocError> {
+    validate_verification_key(cose_key, alg_id)?;
     match alg_id {
         algorithms::ES256 => verify_ecdsa_p256(tbs_data, signature, cose_key),
         algorithms::ES384 => verify_ecdsa_p384(tbs_data, signature, cose_key),
@@ -21,6 +22,77 @@ pub fn verify_cose_signature(
             "COSE algorithm {alg_id}"
         ))),
     }
+}
+
+/// Enforce the COSE algorithm, key type, curve and declared key usage together.
+pub fn validate_verification_key(key: &coset::CoseKey, alg: i64) -> Result<(), MdocError> {
+    use coset::{Algorithm, KeyOperation, KeyType, Label, iana};
+    let (key_type, curve, coordinate_len) = match alg {
+        -7 => (iana::KeyType::EC2, 1, 32),
+        -35 => (iana::KeyType::EC2, 2, 48),
+        -36 => (iana::KeyType::EC2, 3, 66),
+        -8 => (iana::KeyType::OKP, 6, 32),
+        _ => {
+            return Err(MdocError::UnsupportedAlgorithm(format!(
+                "COSE algorithm {alg}"
+            )));
+        }
+    };
+    if key.kty != KeyType::Assigned(key_type) || key.curve()? != curve {
+        return Err(MdocError::Cose("algorithm/key type/curve mismatch".into()));
+    }
+    if let Some(declared) = &key.alg
+        && !matches!(declared, Algorithm::Assigned(value) if *value as i64 == alg)
+    {
+        return Err(MdocError::Cose(
+            "COSE_Key algorithm does not match signature".into(),
+        ));
+    }
+    if !key.base_iv.is_empty()
+        || (!key.key_ops.is_empty()
+            && !key
+                .key_ops
+                .contains(&KeyOperation::Assigned(iana::KeyOperation::Verify)))
+    {
+        return Err(MdocError::Cose(
+            "COSE_Key does not authorize signature verification".into(),
+        ));
+    }
+    let mut labels = std::collections::BTreeSet::new();
+    let (mut has_x, mut has_y) = (false, false);
+    for (label, value) in &key.params {
+        if !labels.insert(label) {
+            return Err(MdocError::Cose("duplicate COSE_Key parameter".into()));
+        }
+        match label {
+            Label::Int(-1) => {}
+            Label::Int(-2) | Label::Int(-3)
+                if key_type == iana::KeyType::EC2 || *label == Label::Int(-2) =>
+            {
+                if value
+                    .as_bytes()
+                    .is_none_or(|bytes| bytes.len() != coordinate_len)
+                {
+                    return Err(MdocError::Cose(
+                        "invalid COSE_Key coordinate length/type".into(),
+                    ));
+                }
+                has_x |= *label == Label::Int(-2);
+                has_y |= *label == Label::Int(-3);
+            }
+            _ => {
+                return Err(MdocError::Cose(
+                    "private or unsupported COSE_Key parameter".into(),
+                ));
+            }
+        }
+    }
+    if !has_x || (key_type == iana::KeyType::EC2 && !has_y) {
+        return Err(MdocError::Cose(
+            "missing required COSE_Key coordinate".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn verify_ecdsa_p256(
@@ -111,7 +183,7 @@ fn verify_ed25519(
     signature: &[u8],
     cose_key: &coset::CoseKey,
 ) -> Result<bool, MdocError> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, VerifyingKey};
 
     let pub_bytes = cose_key.public_key_bytes()?;
 
@@ -135,19 +207,18 @@ fn verify_ed25519(
 
     let sig = Signature::from_bytes(&sig_bytes);
 
-    Ok(verifying_key.verify(tbs_data, &sig).is_ok())
+    Ok(verifying_key.verify_strict(tbs_data, &sig).is_ok())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    use p256::elliptic_curve::sec1::ToSec1Point;
 
     fn p256_cose_key() -> coset::CoseKey {
-        use rand::rngs::OsRng;
-        let sk = p256::ecdsa::SigningKey::random(&mut OsRng);
+        let sk = p256::ecdsa::SigningKey::from_slice(&[1u8; 32]).unwrap();
         let pk = p256::PublicKey::from(sk.verifying_key());
-        let point = pk.to_encoded_point(false);
+        let point = pk.to_sec1_point(false);
         coset::CoseKeyBuilder::new_ec2_pub_key(
             coset::iana::EllipticCurve::P_256,
             point.x().unwrap().to_vec(),
@@ -176,6 +247,52 @@ mod tests {
         let key = p256_cose_key();
         // 63 bytes (one short of raw r||s) must be rejected.
         assert!(verify_cose_signature(b"m", &[0u8; 63], &key, algorithms::ES256).is_err());
+    }
+
+    #[test]
+    fn ec2_verification_keys_require_both_coordinates_before_signing_preparation() {
+        let complete = p256_cose_key();
+        assert!(validate_verification_key(&complete, algorithms::ES256).is_ok());
+        for missing in [-2, -3] {
+            let mut key = complete.clone();
+            key.params
+                .retain(|(label, _)| *label != coset::Label::Int(missing));
+            let error = validate_verification_key(&key, algorithms::ES256).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("missing required COSE_Key coordinate")
+            );
+        }
+    }
+
+    #[test]
+    fn okp_verification_keys_require_x_but_reject_y() {
+        let public = ed25519_dalek::SigningKey::from_bytes(&[1; 32])
+            .verifying_key()
+            .to_bytes();
+        let mut key = coset::CoseKey {
+            kty: coset::KeyType::Assigned(coset::iana::KeyType::OKP),
+            params: vec![
+                (coset::Label::Int(-1), 6.into()),
+                (
+                    coset::Label::Int(-2),
+                    ciborium::Value::Bytes(public.to_vec()),
+                ),
+            ],
+            ..Default::default()
+        };
+        assert!(validate_verification_key(&key, algorithms::EDDSA).is_ok());
+        key.params
+            .push((coset::Label::Int(-3), ciborium::Value::Bytes(vec![0; 32])));
+        assert!(validate_verification_key(&key, algorithms::EDDSA).is_err());
+        key.params.truncate(1);
+        let error = validate_verification_key(&key, algorithms::EDDSA).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("missing required COSE_Key coordinate")
+        );
     }
 
     // ── ES512 / P-521 known-answer vector ───────────────────────────────────

@@ -1,18 +1,100 @@
 //! COSE key and signature utilities for mdoc.
 
 use crate::error::MdocError;
-use coset::{iana, RegisteredLabelWithPrivate};
+use coset::{AsCborValue, RegisteredLabelWithPrivate, iana};
 
 pub mod key;
 mod verify;
 
-pub use key::{cose_alg_to_name, CoseKeyExt};
-pub use verify::verify_cose_signature;
+pub use key::{CoseKeyExt, cose_alg_to_name};
+pub use verify::{validate_verification_key, verify_cose_signature};
+
+/// Check wire labels and decode without normalizing tags into field types.
+/// The bitset records the labels that actually occurred on the wire.
+pub(crate) fn parse_header(
+    header: crate::cbor::raw::Item<'_>,
+) -> Result<(u64, coset::Header), MdocError> {
+    let mut labels = 0u64;
+    for entry in header.map()? {
+        let (label, _) = entry?;
+        let label = match label.uint() {
+            Ok(label @ (1 | 2 | 4 | 33)) => label,
+            _ => return Err(MdocError::Cose("unsupported COSE header extension".into())),
+        };
+        labels |= 1 << label;
+    }
+    Ok((labels, coset::Header::from_cbor_value(header.value()?)?))
+}
+
+/// Validate a signature/MAC header without silently accepting security extensions.
+pub(crate) fn validate_headers(
+    protected: &coset::ProtectedHeader,
+    unprotected: &coset::Header,
+) -> Result<i64, MdocError> {
+    let mut original_labels = 0;
+    if let Some(original) = &protected.original_data {
+        let decoded = if original.is_empty() {
+            coset::Header::default()
+        } else {
+            let (labels, decoded) = parse_header(crate::cbor::raw::Item::parse(original)?)?;
+            original_labels = labels;
+            decoded
+        };
+        if decoded != protected.header {
+            return Err(MdocError::Cose(
+                "protected header differs from original signed bytes".into(),
+            ));
+        }
+    }
+    validate_critical_headers(protected, unprotected)?;
+    if unprotected.alg.is_some() {
+        return Err(MdocError::Cose(
+            "alg must occur only in the protected bucket".into(),
+        ));
+    }
+    let algorithm = match protected.header.alg {
+        Some(coset::Algorithm::Assigned(value)) => value as i64,
+        _ => {
+            return Err(MdocError::Cose(
+                "missing or unsupported protected algorithm".into(),
+            ));
+        }
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, header) in [&protected.header, unprotected].into_iter().enumerate() {
+        // Only alg, crit, kid and x5chain are processed by this profile.
+        if header.content_type.is_some()
+            || !header.iv.is_empty()
+            || !header.partial_iv.is_empty()
+            || !header.counter_signatures.is_empty()
+        {
+            return Err(MdocError::Cose("unsupported COSE security header".into()));
+        }
+        let has_key_id =
+            !header.key_id.is_empty() || (index == 0 && original_labels & (1 << 4) != 0);
+        if has_key_id && !seen.insert(coset::Label::Int(4)) {
+            return Err(MdocError::Cose(
+                "duplicate header across protected/unprotected buckets".into(),
+            ));
+        }
+        for (label, _) in &header.rest {
+            if *label != coset::Label::Int(33) {
+                return Err(MdocError::Cose("unsupported COSE header extension".into()));
+            }
+            if !seen.insert(label.clone()) {
+                return Err(MdocError::Cose(
+                    "duplicate header across protected/unprotected buckets".into(),
+                ));
+            }
+        }
+    }
+    Ok(algorithm)
+}
 
 /// Validate the COSE critical-header contract implemented by this crate.
 ///
 /// RFC 9052 requires every entry in `crit` to name a protected header that the
-/// recipient understands and processes. mdoc-rs currently processes only the
+/// recipient understands and processes. This profile currently processes only the
 /// protected `alg` header, so all other assigned, text, and private-use labels
 /// fail closed. A `crit` parameter in the unprotected bucket is always invalid.
 pub(crate) fn validate_critical_headers(
@@ -138,7 +220,45 @@ mod tests {
             .expect("coset 0.4 represents private-use critical labels");
 
         let error = validate_critical_headers(&parsed.protected, &parsed.unprotected)
-            .expect_err("mdoc-rs does not implement this private-use header");
+            .expect_err("this profile does not implement this private-use header");
         assert!(error.to_string().contains("private-use critical"));
+    }
+
+    #[test]
+    fn original_protected_bytes_cannot_hide_empty_security_headers() {
+        // A typed default cannot override explicit unsupported wire fields.
+        for encoded in ["a201260540", "a201260640", "a201260780"] {
+            let protected = coset::ProtectedHeader {
+                original_data: Some(hex::decode(encoded).unwrap()),
+                header: coset::HeaderBuilder::new()
+                    .algorithm(iana::Algorithm::ES256)
+                    .build(),
+            };
+            assert!(validate_headers(&protected, &coset::Header::default()).is_err());
+        }
+    }
+
+    #[test]
+    fn original_empty_kid_is_rejected_instead_of_treated_as_absent() {
+        let protected = coset::ProtectedHeader {
+            original_data: Some(hex::decode("a201260440").unwrap()),
+            header: coset::HeaderBuilder::new()
+                .algorithm(iana::Algorithm::ES256)
+                .build(),
+        };
+        assert!(validate_headers(&protected, &coset::Header::default()).is_err());
+        let unprotected = coset::HeaderBuilder::new().key_id(vec![1]).build();
+        assert!(validate_headers(&protected, &unprotected).is_err());
+    }
+
+    #[test]
+    fn signed_protected_bytes_must_match_decoded_header_fields() {
+        let protected = coset::ProtectedHeader {
+            original_data: Some(hex::decode("a1013822").unwrap()), // ES384, not ES256.
+            header: coset::HeaderBuilder::new()
+                .algorithm(iana::Algorithm::ES256)
+                .build(),
+        };
+        assert!(validate_headers(&protected, &coset::Header::default()).is_err());
     }
 }

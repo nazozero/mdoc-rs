@@ -1,44 +1,43 @@
-//! DeviceResponse and DeviceRequest types (ISO 18013-5 §8.3.2.1.2).
+//! DeviceResponse container (ISO 18013-5 §8.3.2.1.2.2).
 
-use std::collections::HashMap;
+use super::document::IssuerSignedDocument;
 
-/// Device response (ISO 18013-5 §8.3.2.1.2.2).
-///
-/// Wraps one or more documents in a response to a reader's request.
+/// Top-level mdoc container.
 #[derive(Clone, Debug)]
 pub struct DeviceResponse {
-    /// Version (must be "1.0").
+    /// Received DeviceResponse version. Verification accepts known major 1
+    /// with any numeric minor version; document issuance emits "1.0".
     pub version: String,
-    /// Documents in the response.
-    pub documents: Option<Vec<super::document::IssuerSignedDocument>>,
     /// Status code.
-    pub status: u8,
+    pub status: DeviceResponseStatus,
+    /// Issuer-signed documents.
+    pub documents: Vec<IssuerSignedDocument>,
 }
 
-/// Device request (ISO 18013-5 §8.3.2.1.2.1).
-#[derive(Clone, Debug)]
-pub struct DeviceRequest {
-    /// Version (must be "1.0").
-    pub version: String,
-    /// Per-document requests.
-    pub doc_requests: Vec<DocRequest>,
+/// DeviceResponse status codes (ISO 18013-5 Table 8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DeviceResponseStatus {
+    /// No error.
+    Ok = 0,
+    /// General error.
+    GeneralError = 10,
+    /// CBOR decoding error.
+    CborDecodingError = 11,
+    /// CBOR validation error.
+    CborValidationError = 12,
 }
 
-/// Per-document request.
-#[derive(Clone, Debug)]
-pub struct DocRequest {
-    /// Requested items.
-    pub items_request: ItemsRequest,
-    /// Optional reader authentication (COSE_Sign1).
-    pub reader_auth: Option<coset::CoseSign1>,
-}
-
-/// Items request (specifies which data elements to request).
-#[derive(Clone, Debug)]
-pub struct ItemsRequest {
-    /// Document type.
-    pub doc_type: String,
-    /// Requested namespaces and elements.
-    /// namespace → (element_identifier → intent_to_retain).
-    pub name_spaces: HashMap<String, HashMap<String, bool>>,
+impl DeviceResponseStatus {
+    /// Parse a defined status code without substituting a known value for an unknown code.
+    /// The caller decides whether a known error response is useful in its API.
+    pub fn from_u8(val: u8) -> Option<Self> {
+        match val {
+            0 => Some(Self::Ok),
+            10 => Some(Self::GeneralError),
+            11 => Some(Self::CborDecodingError),
+            12 => Some(Self::CborValidationError),
+            _ => None,
+        }
+    }
 }

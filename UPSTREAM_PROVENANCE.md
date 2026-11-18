@@ -1,8 +1,9 @@
-# Upstream provenance
+# Imported-source provenance
 
-This repository is a controlled source mirror for NazoAuth. It is not the
-upstream `mdoc-rs` repository and must not be represented as an upstream
-release.
+This document records the historical controlled source import used by NazoAuth.
+The repository now maintains the `nazo-mdoc` protocol-core continuation; it is
+not the original upstream `mdoc-rs` repository or an upstream release. The import
+facts below remain unchanged by the later package rename and architectural work.
 
 ## crates.io baseline
 

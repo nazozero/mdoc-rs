@@ -1,9 +1,20 @@
 //! Core types: MSO, ValidityInfo, DeviceKeyInfo, DeviceAuth, DigestAlgorithm.
 
-use chrono::{DateTime, Utc};
+use crate::time::Timestamp;
 use coset::{CoseKey, CoseMac0, CoseSign1};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// ISO 18013-5 §8.1 requires accepting an unknown minor version of a known
+/// major version. Compare decimal text without imposing an integer-size limit.
+pub(crate) fn supports_version(version: &str) -> bool {
+    let Some((major, minor)) = version.split_once('.') else {
+        return false;
+    };
+    major.trim_start_matches('0') == "1"
+        && !minor.is_empty()
+        && minor.bytes().all(|byte| byte.is_ascii_digit())
+}
 
 /// Digest algorithm for MSO value digests.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,10 +57,14 @@ impl DigestAlgorithm {
     }
 }
 
-/// Mobile Security Object (ISO 18013-5 §9.1.2).
+/// Parsed Mobile Security Object (ISO 18013-5 §9.1.2).
+///
+/// Parsing establishes the data model, not issuer authenticity or trust. Obtain
+/// authenticated claims through the protocol verifier before making decisions.
 #[derive(Clone, Debug)]
 pub struct Mso {
-    /// MSO version (must be "1.0").
+    /// Received MSO version. Major version 1 with any numeric minor version is
+    /// supported; issuance uses "1.0" (ISO 18013-5 §8.1).
     pub version: String,
     /// Digest algorithm for value digests.
     pub digest_algorithm: DigestAlgorithm,
@@ -60,23 +75,26 @@ pub struct Mso {
     /// Value digests: namespace → (digestID → digest bytes).
     pub value_digests: HashMap<String, HashMap<u32, Vec<u8>>>,
     /// Device key information.
-    pub device_key_info: Option<DeviceKeyInfo>,
-    /// Revocation / status information (ISO 18013-5 Amd. / IETF Token Status
-    /// List). Absent when the issuer published no status mechanism.
+    pub device_key_info: DeviceKeyInfo,
+    /// Status information. `None` means the signed MSO has no `status` member;
+    /// an unknown mechanism is retained as `Some`, never converted to absence.
     pub status: Option<MsoStatus>,
+    /// Unrecognized MSO members, retained for an explicit profile decision.
+    pub additional_fields: HashMap<String, ciborium::Value>,
 }
 
 /// MSO `status` element (revocation information).
 ///
-/// ISO/IEC 18013-5 carries an optional `status` map in the MSO. The
-/// most common form is the IETF Token Status List reference
-/// (`status_list: { idx, uri }`); other/forward-compatible shapes are preserved
-/// verbatim in [`MsoStatus::raw`] so callers can inspect them.
+/// The extension uses the IETF Token Status List draft-21 status model. It is
+/// not part of the original ISO/IEC 18013-5:2021 MSO schema. Every mechanism and
+/// extension member is retained in [`MsoStatus::raw`] for the caller's policy.
 #[derive(Clone, Debug)]
 pub struct MsoStatus {
     /// IETF Token Status List reference, when present.
     pub status_list: Option<StatusListInfo>,
-    /// The raw, undecoded `status` CBOR value (always populated).
+    /// Complete decoded `status` value, including unknown mechanisms and
+    /// members. This is not a replacement for the original signed bytes, which
+    /// remain in [`super::IssuerAuth::cose_sign1`].
     pub raw: ciborium::Value,
 }
 
@@ -85,7 +103,9 @@ pub struct MsoStatus {
 pub struct StatusListInfo {
     /// Index of this credential's entry within the referenced status list.
     pub idx: u64,
-    /// URI from which the status list token can be fetched.
+    /// Syntactically valid RFC 3986 URI, preserved without normalization.
+    /// Fetch authorization, permitted schemes and SSRF defenses belong to the
+    /// caller; a valid URI alone is not permission to contact its target.
     pub uri: String,
 }
 
@@ -93,13 +113,43 @@ pub struct StatusListInfo {
 #[derive(Clone, Debug)]
 pub struct ValidityInfo {
     /// When the MSO was signed.
-    pub signed: DateTime<Utc>,
+    pub signed: Timestamp,
     /// When the MSO becomes valid.
-    pub valid_from: DateTime<Utc>,
+    pub valid_from: Timestamp,
     /// When the MSO expires.
-    pub valid_until: DateTime<Utc>,
+    pub valid_until: Timestamp,
     /// Expected next update (optional).
-    pub expected_update: Option<DateTime<Utc>>,
+    pub expected_update: Option<Timestamp>,
+}
+
+impl ValidityInfo {
+    /// Validate the timestamp representation and ordering required by the MSO
+    /// profile. Does not decide whether the credential is valid at a given time.
+    pub fn validate(&self) -> Result<(), crate::MdocError> {
+        for timestamp in [
+            Some(&self.signed),
+            Some(&self.valid_from),
+            Some(&self.valid_until),
+            self.expected_update.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            // Timestamp already guarantees a supported four-digit UTC year
+            // and retains whole leap seconds separately from ordinary instants.
+            if !timestamp.is_whole_second() {
+                return Err(crate::MdocError::Validity(
+                    "MSO timestamps require whole UTC seconds and four-digit years".into(),
+                ));
+            }
+        }
+        if self.signed > self.valid_from || self.valid_from >= self.valid_until {
+            return Err(crate::MdocError::Validity(
+                "MSO validity must satisfy signed <= validFrom < validUntil".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Device key information from MSO.
@@ -109,6 +159,11 @@ pub struct DeviceKeyInfo {
     pub device_key: CoseKey,
     /// Key authorizations (optional).
     pub key_authorizations: Option<KeyAuthorizations>,
+    /// Optional integer-keyed information about the device key. Preserved for
+    /// the application's profile; it conveys no extra authorization by itself.
+    pub key_info: Option<ciborium::Value>,
+    /// Unrecognized members, retained for an explicit profile decision.
+    pub additional_fields: HashMap<String, ciborium::Value>,
 }
 
 /// Key authorizations for device key.

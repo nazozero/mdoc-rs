@@ -1,6 +1,5 @@
 //! IssuerSignedItem — individual attribute with digest verification.
 
-use crate::cbor::data_item;
 use crate::model::types::DigestAlgorithm;
 
 /// A single issuer-signed data element (ISO 18013-5 §9.1.2.4).
@@ -17,7 +16,8 @@ pub struct IssuerSignedItem {
     pub element_identifier: String,
     /// Attribute value (CBOR).
     pub element_value: ciborium::Value,
-    /// Original CBOR-encoded bytes (needed for digest computation).
+    /// Complete original IssuerSignedItemBytes, including Tag 24 and bstr header.
+    /// This wire representation is authoritative for authentication/encoding.
     pub encoded: Vec<u8>,
 }
 
@@ -27,26 +27,30 @@ impl IssuerSignedItem {
     /// ISO 18013-5 §9.1.2.5 mandates that the value digest is taken over the
     /// `IssuerSignedItemBytes = #6.24(bstr .cbor IssuerSignedItem)` — i.e. the
     /// **Tag-24-wrapped** encoding, not the bare item bytes. `self.encoded`
-    /// holds the inner (un-tagged) item bytes exactly as received/produced, and
-    /// we wrap them in the canonical Tag 24 envelope before hashing so we
-    /// interoperate with conformant issuers (MEDIUM-1).
+    /// holds that complete tagged byte string. Its bytes
+    /// are hashed exactly as received, without constructing a replacement
+    /// envelope or re-encoding the inner map.
     pub fn compute_digest(&self, alg: &DigestAlgorithm) -> Vec<u8> {
         use sha2::Digest;
-        let wrapped = data_item::encode_cbor(&data_item::wrap_tag24(&self.encoded))
-            // Re-encoding a Tag 24 byte string can only fail on an allocator
-            // error; fall back to the raw bytes so we still fail closed
-            // (a wrong digest never matches) rather than panicking.
-            .unwrap_or_else(|_| self.encoded.clone());
         match alg {
-            DigestAlgorithm::Sha256 => sha2::Sha256::digest(&wrapped).to_vec(),
-            DigestAlgorithm::Sha384 => sha2::Sha384::digest(&wrapped).to_vec(),
-            DigestAlgorithm::Sha512 => sha2::Sha512::digest(&wrapped).to_vec(),
+            DigestAlgorithm::Sha256 => sha2::Sha256::digest(&self.encoded).to_vec(),
+            DigestAlgorithm::Sha384 => sha2::Sha384::digest(&self.encoded).to_vec(),
+            DigestAlgorithm::Sha512 => sha2::Sha512::digest(&self.encoded).to_vec(),
         }
     }
 
-    /// Verify this item against a digest from the MSO.
+    /// Compare the hash of `encoded` with a supplied digest.
+    ///
+    /// This checks only the original wire bytes. It does not authenticate the
+    /// MSO or establish that this public model's mutable decoded fields still
+    /// agree with those bytes. Use [`crate::verify_presentation`] or
+    /// [`crate::verifier::verify_issued`] to obtain authenticated decoded claims.
     pub fn verify_digest(&self, expected_digest: &[u8], alg: &DigestAlgorithm) -> bool {
-        let computed = self.compute_digest(alg);
-        computed == expected_digest
+        use sha2::Digest;
+        match alg {
+            DigestAlgorithm::Sha256 => &sha2::Sha256::digest(&self.encoded)[..] == expected_digest,
+            DigestAlgorithm::Sha384 => &sha2::Sha384::digest(&self.encoded)[..] == expected_digest,
+            DigestAlgorithm::Sha512 => &sha2::Sha512::digest(&self.encoded)[..] == expected_digest,
+        }
     }
 }

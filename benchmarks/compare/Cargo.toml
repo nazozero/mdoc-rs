@@ -1,0 +1,30 @@
+[package]
+name = "nazo-mdoc-production-comparison"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+license = "BSD-2-Clause"
+
+# A separate lockfile/target prevents benchmark-only dependencies from entering
+# the core package or NazoAuth's dependency graph.
+[workspace]
+
+[dependencies]
+baseline = { package = "mdoc-rs", git = "https://github.com/nazozero/mdoc-rs", rev = "9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc", default-features = false, features = ["issue"] }
+candidate = { package = "nazo-mdoc", path = "../..", default-features = false, features = ["issue"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+ciborium = "0.2"
+coset = "0.4.2"
+der = "0.7"
+hex = "0.4"
+libc = "0.2"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
+sha2 = "0.10"
+signature = "3"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
