@@ -11,7 +11,7 @@ use coset::iana;
 /// Point validation is delegated to the same RustCrypto implementations used
 /// for signature verification, not reimplemented here.
 pub(crate) fn validate_device_public_key(key: &coset::CoseKey) -> Result<(), MdocError> {
-    let alg = match (key.kty.clone(), key.curve()?) {
+    let alg = match (&key.kty, key.curve()?) {
         (coset::KeyType::Assigned(iana::KeyType::EC2), 1) => -7,
         (coset::KeyType::Assigned(iana::KeyType::EC2), 2) => -35,
         (coset::KeyType::Assigned(iana::KeyType::EC2), 3) => -36,
@@ -74,9 +74,7 @@ pub trait CoseKeyExt {
 
 impl CoseKeyExt for coset::CoseKey {
     fn public_key_bytes(&self) -> Result<Vec<u8>, MdocError> {
-        let kty = self.kty.clone();
-
-        match kty {
+        match &self.kty {
             coset::KeyType::Assigned(iana::KeyType::EC2) => {
                 // EC2 key: extract x and y coordinates
                 let x = get_param(&self.params, iana::Ec2KeyParameter::X as i64)?;
@@ -93,7 +91,10 @@ impl CoseKeyExt for coset::CoseKey {
                 let x = get_param(&self.params, iana::OkpKeyParameter::X as i64)?;
                 Ok(x.to_vec())
             }
-            _ => Err(MdocError::Cose(format!("unsupported key type: {:?}", kty))),
+            _ => Err(MdocError::Cose(format!(
+                "unsupported key type: {:?}",
+                self.kty
+            ))),
         }
     }
 
@@ -106,10 +107,8 @@ impl CoseKeyExt for coset::CoseKey {
     }
 
     fn curve(&self) -> Result<i64, MdocError> {
-        let kty = self.kty.clone();
-        match kty {
-            coset::KeyType::Assigned(iana::KeyType::EC2) => {
-                // Look for crv parameter (label -1)
+        match &self.kty {
+            coset::KeyType::Assigned(iana::KeyType::EC2 | iana::KeyType::OKP) => {
                 for (label, value) in &self.params {
                     if let coset::Label::Int(-1) = label
                         && let ciborium::Value::Integer(crv) = value
@@ -118,20 +117,12 @@ impl CoseKeyExt for coset::CoseKey {
                             .map_err(|_| MdocError::Cose("curve out of range".into()));
                     }
                 }
-                Err(MdocError::Cose("missing curve in EC2 key".to_string()))
+                Err(MdocError::Cose("missing curve in COSE key".to_string()))
             }
-            coset::KeyType::Assigned(iana::KeyType::OKP) => {
-                for (label, value) in &self.params {
-                    if let coset::Label::Int(-1) = label
-                        && let ciborium::Value::Integer(crv) = value
-                    {
-                        return i64::try_from(i128::from(*crv))
-                            .map_err(|_| MdocError::Cose("curve out of range".into()));
-                    }
-                }
-                Err(MdocError::Cose("missing curve in OKP key".to_string()))
-            }
-            _ => Err(MdocError::Cose(format!("unsupported key type: {:?}", kty))),
+            _ => Err(MdocError::Cose(format!(
+                "unsupported key type: {:?}",
+                self.kty
+            ))),
         }
     }
 }

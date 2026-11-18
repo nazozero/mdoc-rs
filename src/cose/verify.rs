@@ -13,6 +13,18 @@ pub fn verify_cose_signature(
     alg_id: i64,
 ) -> Result<bool, MdocError> {
     validate_verification_key(cose_key, alg_id)?;
+    verify_with_validated_key(tbs_data, signature, cose_key, alg_id)
+}
+
+/// Prepared signing operations retain the key and algorithm privately after
+/// `validate_verification_key`. Confirm each external signature without checking
+/// that unchanged key metadata again.
+pub(crate) fn verify_with_validated_key(
+    tbs_data: &[u8],
+    signature: &[u8],
+    cose_key: &coset::CoseKey,
+    alg_id: i64,
+) -> Result<bool, MdocError> {
     match alg_id {
         algorithms::ES256 => verify_ecdsa_p256(tbs_data, signature, cose_key),
         algorithms::ES384 => verify_ecdsa_p384(tbs_data, signature, cose_key),

@@ -38,7 +38,7 @@ impl PreparedDocument {
 
     /// Attach the external signature after checking it against the leaf key.
     pub fn finish(mut self, signature: Vec<u8>) -> Result<IssuerSignedDocument, MdocError> {
-        if !crate::cose::verify_cose_signature(
+        if !crate::cose::verify_with_validated_key(
             &self.signing_input,
             &signature,
             &self.issuer_key,
@@ -232,13 +232,16 @@ impl DocumentBuilder {
             &validity,
             value_digests,
             device_key,
-            self.status,
+            self.status
+                .map(crate::model::issuer_auth::parse_status)
+                .transpose()?
+                .map(|status| status.raw),
         )?;
 
-        let mso_inner = data_item::encode_cbor_canonical(&mso_map)?;
-        // Move the decoded values through semantic validation after encoding;
-        // there is no need to clone the MSO tree before external signing.
-        crate::model::issuer_auth::parse_mso_value(mso_map)?;
+        // The builder established the field semantics above. Check uniqueness
+        // and limits once on the complete Tag 24 envelope after encoding.
+        let mut mso_inner = Vec::new();
+        data_item::write_canonical(&mso_map, &mut mso_inner, 0)?;
         let mso_bytes = crate::cbor::raw::wrap_tag24_bytes(&mso_inner);
         crate::cbor::raw::validate(&mso_bytes)?;
         let alg = match algorithm {

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use coset::{CborSerializable, CoseKey, CoseSign1, Header, HeaderBuilder, ProtectedHeader};
 
 use crate::cbor::raw;
-use crate::cose::{validate_verification_key, verify_cose_signature};
+use crate::cose::{validate_verification_key, verify_with_validated_key};
 use crate::error::MdocError;
 use crate::model::document::{DeviceSigned, IssuerSignedDocument};
 use crate::model::types::DeviceAuth;
@@ -104,7 +104,7 @@ impl PreparedDeviceAuthentication {
     /// A wrong key, altered input, DER-encoded ECDSA value, or invalid signature
     /// cannot produce a successfully completed document.
     pub fn finish(mut self, signature: Vec<u8>) -> Result<IssuerSignedDocument, MdocError> {
-        if !verify_cose_signature(
+        if !verify_with_validated_key(
             &self.signing_input,
             &signature,
             &self.device_key,

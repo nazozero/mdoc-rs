@@ -9,6 +9,8 @@ mod verify;
 
 pub use key::{CoseKeyExt, cose_alg_to_name};
 pub(crate) use structure::{mac0_structure, sign1_structure};
+#[cfg(feature = "issue")]
+pub(crate) use verify::verify_with_validated_key;
 pub use verify::{validate_verification_key, verify_cose_signature};
 
 /// Check wire labels and decode without normalizing tags into field types.
