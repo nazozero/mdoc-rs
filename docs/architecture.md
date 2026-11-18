@@ -18,9 +18,11 @@ transport.
    certificate chain. The application checks issuer trust, certificate
    revocation, credential status, request freshness and authorization.
 
-Public parsed models are editable. Authentication therefore starts from wire
-bytes; standalone primitives validate their own mutable inputs. Private paths
-can reuse validation while they retain exclusive control of those inputs.
+`verify_presentation` and `verify_issued` authenticate wire bytes and keep parsed
+documents private until validation completes. Their disclosure path reuses the
+parser's digest-ID, identifier and salt checks. `verify_disclosure` accepts
+caller-mutable models and repeats those checks; its caller supplies an
+authenticated MSO and keeps metadata consistent with the encoded item bytes.
 
 ## Signing flow
 
