@@ -70,25 +70,29 @@ pub fn verify_presentation(
             .device_signed
             .as_ref()
             .ok_or_else(|| MdocError::DeviceAuth("missing holder authentication".into()))?;
-        if !matches!(device.device_auth, DeviceAuth::Signature(_)) {
+        let DeviceAuth::Signature(signature) = &device.device_auth else {
             return Err(MdocError::DeviceAuth(
                 "presentation verification requires DeviceSignature".into(),
             ));
-        }
+        };
         check_key_authorizations(&mso.device_key_info, &device.name_spaces)?;
         let payload = crate::session::build_device_authentication_validated(
             transcript,
             &document.doc_type,
             &device.name_spaces_bytes,
         );
-        let result = crate::device_auth::verify_device_auth(
-            &device.device_auth,
-            &payload,
-            &mso.device_key_info.device_key,
-            None,
-        )
-        .map_err(|error| MdocError::DeviceAuth(error.to_string()))?;
-        if !result.is_valid {
+        let is_valid =
+            crate::cose::validate_parsed_headers(&signature.protected, &signature.unprotected)
+                .and_then(|algorithm| {
+                    crate::device_auth::verify_device_signature(
+                        signature,
+                        &payload,
+                        &mso.device_key_info.device_key,
+                        algorithm,
+                    )
+                })
+                .map_err(|error| MdocError::DeviceAuth(error.to_string()))?;
+        if !is_valid {
             return Err(MdocError::DeviceAuth(
                 "holder signature does not match session".into(),
             ));
@@ -166,7 +170,7 @@ pub(crate) fn certificate_interval(
 fn authenticate_issuer(document: &IssuerSignedDocument) -> Result<IssuerEvidence, MdocError> {
     let auth = &document.issuer_signed.issuer_auth;
     let sign1 = &auth.cose_sign1;
-    let algorithm = crate::cose::validate_headers(&sign1.protected, &sign1.unprotected)?;
+    let algorithm = crate::cose::validate_parsed_headers(&sign1.protected, &sign1.unprotected)?;
     let payload = sign1.payload.as_deref().ok_or_else(|| {
         MdocError::Signature("issuerAuth requires an embedded MSO payload".into())
     })?;

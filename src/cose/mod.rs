@@ -33,14 +33,11 @@ pub(crate) fn validate_headers(
     protected: &coset::ProtectedHeader,
     unprotected: &coset::Header,
 ) -> Result<i64, MdocError> {
-    let mut original_labels = 0;
     if let Some(original) = &protected.original_data {
         let decoded = if original.is_empty() {
             coset::Header::default()
         } else {
-            let (labels, decoded) = parse_header(crate::cbor::raw::Item::parse(original)?)?;
-            original_labels = labels;
-            decoded
+            parse_header(crate::cbor::raw::Item::parse(original)?)?.1
         };
         if decoded != protected.header {
             return Err(MdocError::Cose(
@@ -48,6 +45,16 @@ pub(crate) fn validate_headers(
             ));
         }
     }
+    validate_parsed_headers(protected, unprotected)
+}
+
+/// Check header semantics after the wire parser established the immutable
+/// protected bytes and decoded fields. Public mutable-model APIs use
+/// `validate_headers` to establish that binding before entering this path.
+pub(crate) fn validate_parsed_headers(
+    protected: &coset::ProtectedHeader,
+    unprotected: &coset::Header,
+) -> Result<i64, MdocError> {
     validate_critical_headers(protected, unprotected)?;
     if unprotected.alg.is_some() {
         return Err(MdocError::Cose(
@@ -63,7 +70,7 @@ pub(crate) fn validate_headers(
         }
     };
     let mut seen = 0u64;
-    for (index, header) in [&protected.header, unprotected].into_iter().enumerate() {
+    for header in [&protected.header, unprotected] {
         // Only alg, crit, kid and x5chain are processed by this profile.
         if header.content_type.is_some()
             || !header.iv.is_empty()
@@ -72,9 +79,8 @@ pub(crate) fn validate_headers(
         {
             return Err(MdocError::Cose("unsupported COSE security header".into()));
         }
-        let has_key_id =
-            !header.key_id.is_empty() || (index == 0 && original_labels & (1 << 4) != 0);
-        if has_key_id {
+        // coset rejects an explicitly empty kid when parsing a header.
+        if !header.key_id.is_empty() {
             if seen & (1 << 4) != 0 {
                 return Err(MdocError::Cose(
                     "duplicate header across protected/unprotected buckets".into(),

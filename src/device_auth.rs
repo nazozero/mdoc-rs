@@ -34,7 +34,18 @@ pub fn verify_device_auth(
 ) -> Result<DeviceAuthResult, MdocError> {
     match device_auth {
         DeviceAuth::Signature(sign1) => {
-            verify_device_signature(sign1, device_authentication_bytes, device_key)
+            let algorithm = crate::cose::validate_headers(&sign1.protected, &sign1.unprotected)?;
+            let is_valid =
+                verify_device_signature(sign1, device_authentication_bytes, device_key, algorithm)?;
+            Ok(DeviceAuthResult {
+                is_valid,
+                algorithm: crate::cose::cose_alg_to_name(algorithm).to_owned(),
+                reasons: if is_valid {
+                    vec![]
+                } else {
+                    vec!["device signature verification failed".to_owned()]
+                },
+            })
         }
         DeviceAuth::Mac(mac0) => {
             let mac_key = ephemeral_mac_key.ok_or_else(|| {
@@ -47,34 +58,22 @@ pub fn verify_device_auth(
     }
 }
 
-fn verify_device_signature(
+/// The caller has validated the protected header and selected its algorithm.
+/// Return only the signature result when no diagnostic model is needed.
+pub(crate) fn verify_device_signature(
     sign1: &coset::CoseSign1,
     device_authentication_bytes: &[u8],
     device_key: &coset::CoseKey,
-) -> Result<DeviceAuthResult, MdocError> {
+    algorithm: i64,
+) -> Result<bool, MdocError> {
     if sign1.payload.is_some() {
         return Err(MdocError::DeviceAuth(
             "deviceSignature must use a detached payload".into(),
         ));
     }
-    let alg_id = crate::cose::validate_headers(&sign1.protected, &sign1.unprotected)?;
-    let alg_name = crate::cose::cose_alg_to_name(alg_id).to_string();
-
     let sig_structure =
         crate::cose::sign1_structure(&sign1.protected, device_authentication_bytes)?;
-
-    let is_valid =
-        crate::cose::verify_cose_signature(&sig_structure, &sign1.signature, device_key, alg_id)?;
-
-    Ok(DeviceAuthResult {
-        is_valid,
-        algorithm: alg_name,
-        reasons: if is_valid {
-            vec![]
-        } else {
-            vec!["device signature verification failed".to_string()]
-        },
-    })
+    crate::cose::verify_cose_signature(&sig_structure, &sign1.signature, device_key, algorithm)
 }
 
 /// Check an HMAC-256/256 COSE_Mac0 using an externally derived EMacKey.
