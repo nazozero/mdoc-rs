@@ -1,0 +1,5 @@
+round,variant,case,observations,wall_ns_p50,wall_ns_p95,wall_ns_p99,wall_ns_mean,thread_cpu_ns_p50,thread_cpu_ns_p95,thread_cpu_ns_p99,thread_cpu_ns_mean,allocations_p50,allocations_p95,allocations_p99,allocations_mean,requested_bytes_p50,requested_bytes_p95,requested_bytes_p99,requested_bytes_mean
+round-01,baseline,issuer_signed_encode,1000,7160,21222,177488,25660.802,7381,22273,178075,26217.169,45,45,45,45.0,12421,12421,12421,12421.0
+round-01,candidate,issuer_signed_encode,1000,6910,12869,72289,9660.711,7121,13370,79559,10071.335,45,45,45,45.0,12421,12421,12421,12421.0
+round-02,baseline,issuer_signed_encode,1000,7582,14422,118649,11389.618,7801,15063,119358,11770.196,45,45,45,45.0,12421,12421,12421,12421.0
+round-02,candidate,issuer_signed_encode,1000,6860,12149,33290,8504.402,7061,12629,33791,8795.861,45,45,45,45.0,12421,12421,12421,12421.0

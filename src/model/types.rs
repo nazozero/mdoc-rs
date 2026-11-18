@@ -59,8 +59,7 @@ impl DigestAlgorithm {
 
 /// Parsed Mobile Security Object (ISO 18013-5 §9.1.2).
 ///
-/// Parsing establishes the data model, not issuer authenticity or trust. Obtain
-/// authenticated claims through the protocol verifier before making decisions.
+/// Use the protocol verifier to obtain authenticated claims from wire bytes.
 #[derive(Clone, Debug)]
 pub struct Mso {
     /// Received MSO version. Major version 1 with any numeric minor version is
@@ -77,7 +76,7 @@ pub struct Mso {
     /// Device key information.
     pub device_key_info: DeviceKeyInfo,
     /// Status information. `None` means the signed MSO has no `status` member;
-    /// an unknown mechanism is retained as `Some`, never converted to absence.
+    /// an unknown mechanism is retained as `Some`.
     pub status: Option<MsoStatus>,
     /// Unrecognized MSO members, retained for an explicit profile decision.
     pub additional_fields: HashMap<String, ciborium::Value>,
@@ -85,16 +84,14 @@ pub struct Mso {
 
 /// MSO `status` element (revocation information).
 ///
-/// The extension uses the IETF Token Status List draft-21 status model. It is
-/// not part of the original ISO/IEC 18013-5:2021 MSO schema. Every mechanism and
-/// extension member is retained in [`MsoStatus::raw`] for the caller's policy.
+/// IETF Token Status List draft-21 extends the ISO/IEC 18013-5:2021 MSO schema.
+/// Every mechanism and member is retained in [`MsoStatus::raw`] for caller policy.
 #[derive(Clone, Debug)]
 pub struct MsoStatus {
     /// IETF Token Status List reference, when present.
     pub status_list: Option<StatusListInfo>,
-    /// Complete decoded `status` value, including unknown mechanisms and
-    /// members. This is not a replacement for the original signed bytes, which
-    /// remain in [`super::IssuerAuth::cose_sign1`].
+    /// Complete decoded `status` value, including unknown mechanisms and members.
+    /// Original signed bytes remain in [`super::IssuerAuth::cose_sign1`].
     pub raw: ciborium::Value,
 }
 
@@ -104,8 +101,7 @@ pub struct StatusListInfo {
     /// Index of this credential's entry within the referenced status list.
     pub idx: u64,
     /// Syntactically valid RFC 3986 URI, preserved without normalization.
-    /// Fetch authorization, permitted schemes and SSRF defenses belong to the
-    /// caller; a valid URI alone is not permission to contact its target.
+    /// The caller authorizes fetching, permitted schemes and network targets.
     pub uri: String,
 }
 
@@ -123,8 +119,8 @@ pub struct ValidityInfo {
 }
 
 impl ValidityInfo {
-    /// Validate the timestamp representation and ordering required by the MSO
-    /// profile. Does not decide whether the credential is valid at a given time.
+    /// Validate MSO timestamp representation and ordering. The verifier separately
+    /// checks the credential interval against the supplied verification time.
     pub fn validate(&self) -> Result<(), crate::MdocError> {
         for timestamp in [
             Some(&self.signed),

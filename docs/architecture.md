@@ -1,125 +1,76 @@
-# Core architecture and security boundary
+# Architecture
 
-`nazo-mdoc` is one package with empty default features. A separate crate for each
-CBOR/COSE/model layer would add release coordination without an independent
-consumer boundary. The retained repository name preserves links and provenance;
-the new package name makes the intentionally breaking 0.3 API explicit. There is
-no permanent wrapper pretending to implement the old verifier's trust decisions.
+`nazo-mdoc` is one library with a shared `DeviceResponse` model for parsing and
+encoding. Applications provide signing, trust policy, credential status and
+transport.
 
-There is one `DeviceResponse` model shared by parsing and encoding. The former
-parallel `MDoc`/`DeviceResponse` representations and unimplemented request-model
-scaffolding were removed. Unknown status codes remain errors rather than being
-silently converted into a known general-error code.
+## Verification flow
 
-## Data flow
+1. `cbor::raw` checks encoding, duplicate keys and resource limits, then exposes
+   borrowed spans. Embedded Tag 24 shares its envelope's budget. COSE protected
+   headers and MSO payloads have separate bounded CBOR envelopes.
+2. `parser` checks response, document, item and device namespace structure. It
+   retains complete Tag 24 envelopes and original COSE protected bytes.
+3. `verifier` authenticates the issuer signature using the leaf certificate key,
+   decodes the signed MSO, authenticates the holder against the supplied
+   transcript, then checks disclosure digests, authorizations and validity.
+4. `PendingTrustDocument` exposes immutable authenticated data and the leaf-first
+   certificate chain. The application checks issuer trust, certificate
+   revocation, credential status, request freshness and authorization.
 
-1. `cbor::raw` checks the wire envelope before building decoded containers. It
-   enforces deterministic-profile lengths, unique keys and resource bounds, and
-   supplies borrowed spans. Embedded Tag 24 shares its containing envelope's
-   budget. Opaque COSE byte strings containing CBOR are separately checked
-   envelopes. Map order on input is not normalized.
-2. `parser` checks DeviceResponse, IssuerSigned, item and DeviceSigned shape. It
-   retains the original complete item/namespace Tag 24 and COSE protected bytes.
-   Parsed models are untrusted, editable data structures; they are not evidence.
-3. `verifier` takes wire bytes, verifies issuer cryptography using the leaf's
-   real public-key OIDs, decodes the signed MSO, verifies the holder over the
-   requested transcript, then checks authenticated claims and disclosure. No
-   caller-supplied decoded claim can replace a value from authenticated bytes.
-4. `PendingTrustDocument` exposes immutable authenticated projections and the
-   untrusted certificate chain. Its fields are private and there is no final
-   validity flag. Issuer-only verification returns a different pending type.
-5. NazoAuth completes chain/anchor, certificate revocation, credential status,
-   transaction freshness, request and business policy before final admission.
+`verify_presentation` and `verify_issued` authenticate wire bytes and keep parsed
+documents private until validation completes. Their disclosure path reuses the
+parser's digest-ID, identifier and salt checks. `verify_disclosure` accepts
+caller-mutable models and repeats those checks; its caller supplies an
+authenticated MSO and keeps metadata consistent with the encoded item bytes.
 
-The signature primitives intentionally remain small public tools. A successful
-primitive is not proof of payload structure, certificate trust or a final valid
-credential. Their documentation makes these narrower guarantees explicit.
+## Signing flow
 
-## Signing
+`DocumentBuilder` receives typed attributes, a device public key, validity and
+an optional status reference. It validates the inputs, generates salts and
+31-bit digest IDs, and prepares the MSO and COSE signing bytes. The caller signs
+those bytes. `finish` verifies the signature against the leaf certificate key
+before assembling the credential. Holder signing uses the same sequence.
 
-The issuer builder receives attributes, a device public key, validity, and an
-explicit status choice. It validates a supported *public* device point, rejects
-private key parameters, generates distinct salts and digest IDs, and builds the
-MSO. Subsecond clock input is ordered before and after normalization to whole UTC
-seconds. `time::Timestamp` delegates calendar parsing/formatting to the maintained
-`time` crate and retains a separate leap-second marker. Comparisons distinguish
-the last regular second, the leap second and the next minute; Unix conversion
-returns `None` for leap seconds instead of silently clamping them.
+The prepared bytes and their key context are immutable. This lets an application
+use either a synchronous local signer or an asynchronous external signer without
+introducing a signing service into the library.
 
-`prepare` returns exact immutable signing bytes. The host uses its existing
-asynchronous key lease. `finish` verifies the returned signature before attaching
-it. The holder builder follows the same prepare/sign/finish design. Neither
-builder owns a private key or introduces a signing-service abstraction.
+Attributes retain the caller's CBOR types. Namespace-specific schema mapping
+belongs to the application. Issuance uses deterministic CBOR; wire encoders copy
+already signed fields verbatim.
 
-Generic attributes are typed CBOR values. This library does not infer a schema
-from names such as `birth_date`. NazoAuth's mDL mapping uses explicit namespace
-rules; custom schemas preserve the caller's values. Deterministic issuance
-encoding validates its output profile. Wire encoders retain signed raw values
-and reject invalid or oversized encoded output.
+## Ownership
 
-## Deliberate ownership choices
+- Validated `SessionTranscript` values borrow their input. Final validators hash
+  the supplied context and compare its framing directly with received bytes.
+- Credential models own the data applications retain after releasing a request
+  buffer. MSO projection moves strings, digests and key parameters into the model.
+- Received Tag 24 envelopes, COSE protected headers and MSO payloads remain
+  available in their original byte representation.
+- Uniqueness checks borrow names and salts for the duration of validation.
+- Status retains the complete CBOR extension and a typed projection of a known
+  reference. The application can inspect unknown members before resolving it.
+- Pending results own a leaf-first certificate chain as well as the document's
+  COSE object, allowing `into_parts` to transfer both representations. Leaf-only
+  access borrows DER.
 
-- The single borrowed lifetime belongs to SessionTranscript. Most credential
-  models remain owned because the host retains claims after the request buffer
-  can be released. Extra lifetimes would not eliminate those required copies.
-- MSO decoding occurs once after successful issuer authentication in the main
-  path. The pending result shares that decoded MSO with the host. Raw signed
-  payloads remain available for independent verification or audit.
-- Temporary MSO values are consumed into the owned model. Strings, digest bytes,
-  extension values and device-key parameters move into their final owner rather
-  than being cloned from a disposable decoded tree. Item uniqueness sets borrow
-  names and salts from the input for the duration of parsing; the public item
-  owns only the values it must retain.
-- The status model retains both its whole decoded value and the convenient
-  known-reference projection. Its URI therefore has two owners by design:
-  callers need the complete extension to reject unknown mechanisms, and a typed
-  reference to handle the supported mechanism. Neither view replaces the signed
-  original MSO payload.
-- The pending result owns a leaf-first certificate chain for the host's trust
-  pipeline while retaining the document's original COSE object. That copy allows
-  `into_parts` to transfer both complete representations. A self-referential
-  result or a second public certificate-view abstraction would complicate this
-  lifetime for a small bounded chain; leaf-only access already borrows DER.
-- The raw scanner precedes higher-level decoding for security, so parsing is not
-  claimed to be single-pass or allocation-free. Benchmark reports include its
-  cost alongside savings from removed Value trees and duplicate host verification.
-- X.509 DER parsing extracts a public key and signed-time interval. It does not
-  create a root store or replace NazoAuth's AWS-LC-backed path policy.
-- URI syntax validation is not network authorization. The core has no HTTP
-  client, DNS policy, status cache or list publisher.
-- The explicit verification time avoids an implicit platform clock and permits
-  deterministic tests and WASM consumers. RustCrypto curve dependencies use
-  `alloc` instead of `std`, avoiding an unnecessary verifier entropy dependency.
+## Time and policy
 
-## Checks that cross an API boundary
+The caller supplies verification time. `Timestamp` uses `time` for calendar
+parsing and formatting, with a separate leap-second marker. It orders the last
+regular second, the leap second and the next minute distinctly. Unix conversion
+returns `None` for leap seconds. Builders validate time ordering before and after
+normalizing issuance input to UTC whole seconds.
 
-The raw scanner checks wire shape and resource limits before container
-allocation. The schema decoder checks the meaning and relationships of fields.
-These checks serve different purposes. Public COSE/model values are editable,
-so standalone verification primitives must also compare decoded protected
-headers with their original signed bytes and validate their public-key inputs.
-A result from a previous parse cannot authorize skipping these checks after a
-caller can mutate that model.
+The library checks MSO validity and containment of the signed time within the
+leaf certificate interval. The application validates the X.509 path at its
+verification time and evaluates certificate revocation and credential status.
+URI parsing checks syntax; the application's fetch policy governs network use.
 
-The host's key lease verifies its own signing-key contract. Issuance `finish`
-checks the returned signature against the document-signing certificate key.
-Those bindings are not interchangeable. The core never exposes a switch that
-would let a caller assert either binding without evidence.
+`verify_presentation` selects DeviceSignature and verifies every document
+atomically. Callers set a document limit appropriate to their presentation
+profile. DeviceMAC/HKDF primitives accept an externally established session key.
 
-Final transcript validation hashes context directly and compares the complete
-expected framing and digest with the supplied bytes. Its success result borrows
-that buffer; it does not construct an intermediate CBOR value or expected-byte
-vector. The dedicated benchmark cases measure this narrow path separately from
-owned transcript construction and allocating credential verification.
-
-## Fail-closed profiles
-
-The default server verifier requires DeviceSignature, rejects unknown security
-extensions and returns no partial result for an invalid multi-document response.
-HAIP callers allow exactly one document. Optional Mac0/HKDF primitives remain
-separate; the host must establish their session key and policy. Full proximity
-engagement, reader authentication, Brainpool/Ed448, status publication and ISO
-hardware certification are not implemented by this core.
-
-See `protocol-matrix.md` for normative evidence boundaries and exact owner/test
-mapping, and `migration.md` for the one-time NazoAuth migration.
+See the [protocol matrix](protocol-matrix.md) for requirements and regression
+tests, and [migration guide](migration.md) for the 0.3 API changes.

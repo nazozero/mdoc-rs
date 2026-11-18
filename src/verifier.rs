@@ -1,9 +1,7 @@
-//! Protocol authentication with an explicit, unfinished application trust decision.
+//! Issuer and holder authentication over the received mdoc bytes.
 //!
-//! A successful result authenticates the signed bytes and holder binding. It is
-//! deliberately named `PendingTrustDocument`: X.509 path policy, certificate
-//! revocation, credential status and request authorization remain with the host.
-//! There is no `is_valid` flag or switch that can mark a skipped check as passed.
+//! Applications complete X.509 trust, certificate revocation, credential status
+//! and request authorization using the returned authenticated evidence.
 
 use crate::time::Timestamp;
 use crate::{MdocError, cbor::raw::Limits, model::*, session::SessionTranscript};
@@ -18,7 +16,7 @@ pub struct VerificationOptions {
     pub max_documents: usize,
 }
 
-/// Authenticated protocol data which MUST NOT yet be treated as a trusted credential.
+/// Authenticated protocol data awaiting the application's trust and status checks.
 #[derive(Debug)]
 #[must_use = "complete issuer trust, certificate revocation, status and request policy in the host"]
 pub struct PendingTrustDocument {
@@ -35,7 +33,7 @@ impl PendingTrustDocument {
     pub fn mso(&self) -> &Mso {
         &self.mso
     }
-    /// Leaf first. These certificates have NOT been anchored to a trust store.
+    /// Leaf-first certificate chain for the application's trust evaluation.
     pub fn certificates(&self) -> &[Vec<u8>] {
         &self.certificates
     }
@@ -51,7 +49,7 @@ impl PendingTrustDocument {
 ///
 /// The caller must supply the transcript for its authenticated request context.
 /// A structurally valid raw transcript alone cannot prove request freshness.
-/// This server presentation profile requires DeviceSignature. DeviceMAC remains
+/// This presentation API requires DeviceSignature. DeviceMAC remains
 /// available as an explicit primitive in `device_auth`, with external key setup.
 pub fn verify_presentation(
     encoded: &[u8],
@@ -72,25 +70,29 @@ pub fn verify_presentation(
             .device_signed
             .as_ref()
             .ok_or_else(|| MdocError::DeviceAuth("missing holder authentication".into()))?;
-        if !matches!(device.device_auth, DeviceAuth::Signature(_)) {
+        let DeviceAuth::Signature(signature) = &device.device_auth else {
             return Err(MdocError::DeviceAuth(
-                "DeviceMAC is not enabled by the server signature profile".into(),
+                "presentation verification requires DeviceSignature".into(),
             ));
-        }
+        };
         check_key_authorizations(&mso.device_key_info, &device.name_spaces)?;
         let payload = crate::session::build_device_authentication_validated(
             transcript,
             &document.doc_type,
             &device.name_spaces_bytes,
         );
-        let result = crate::device_auth::verify_device_auth(
-            &device.device_auth,
-            &payload,
-            &mso.device_key_info.device_key,
-            None,
-        )
-        .map_err(|error| MdocError::DeviceAuth(error.to_string()))?;
-        if !result.is_valid {
+        let is_valid =
+            crate::cose::validate_parsed_headers(&signature.protected, &signature.unprotected)
+                .and_then(|algorithm| {
+                    crate::device_auth::verify_device_signature(
+                        signature,
+                        &payload,
+                        &mso.device_key_info.device_key,
+                        algorithm,
+                    )
+                })
+                .map_err(|error| MdocError::DeviceAuth(error.to_string()))?;
+        if !is_valid {
             return Err(MdocError::DeviceAuth(
                 "holder signature does not match session".into(),
             ));
@@ -168,19 +170,17 @@ pub(crate) fn certificate_interval(
 fn authenticate_issuer(document: &IssuerSignedDocument) -> Result<IssuerEvidence, MdocError> {
     let auth = &document.issuer_signed.issuer_auth;
     let sign1 = &auth.cose_sign1;
-    let algorithm = crate::cose::validate_headers(&sign1.protected, &sign1.unprotected)?;
-    if sign1.payload.is_none() {
-        return Err(MdocError::Signature(
-            "issuerAuth requires an embedded MSO payload".into(),
-        ));
-    }
+    let algorithm = crate::cose::validate_parsed_headers(&sign1.protected, &sign1.unprotected)?;
+    let payload = sign1.payload.as_deref().ok_or_else(|| {
+        MdocError::Signature("issuerAuth requires an embedded MSO payload".into())
+    })?;
     let certificates = auth.certificate_chain_der()?;
     let leaf = x509_cert::Certificate::from_der(&certificates[0])
         .map_err(|error| MdocError::Certificate(error.to_string()))?;
     let issuer_key =
         crate::cose::key::cose_key_from_spki(&leaf.tbs_certificate.subject_public_key_info)?;
     if !crate::cose::verify_cose_signature(
-        &sign1.tbs_data(&[]),
+        &crate::cose::sign1_structure(&sign1.protected, payload)?,
         &sign1.signature,
         &issuer_key,
         algorithm,
@@ -233,7 +233,9 @@ fn validate_claims(
             "MSO signed time is outside signer certificate validity".into(),
         ));
     }
-    crate::disclosure::verify_disclosure(&document.issuer_signed.name_spaces, mso)?;
+    // Both entry points constructed this immutable document with the parser,
+    // which checked unique IDs, identifiers and salts before returning it.
+    crate::disclosure::verify_parsed_disclosure(&document.issuer_signed.name_spaces, mso)?;
     Ok(())
 }
 

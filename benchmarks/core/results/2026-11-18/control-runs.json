@@ -1,0 +1,77 @@
+{
+  "unchanged_control": true,
+  "runs": [
+    {
+      "round": 1,
+      "position": 0,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/5e92231441b9/core-control/round-01/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "9ba3a57aa21010fc128d575e273ffef37da9d92769c7f3e720a7c85176875440"
+    },
+    {
+      "round": 1,
+      "position": 1,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/5e92231441b9/core-control/round-01/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "9ba3a57aa21010fc128d575e273ffef37da9d92769c7f3e720a7c85176875440"
+    },
+    {
+      "round": 2,
+      "position": 0,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/5e92231441b9/core-control/round-02/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "9ba3a57aa21010fc128d575e273ffef37da9d92769c7f3e720a7c85176875440"
+    },
+    {
+      "round": 2,
+      "position": 1,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/5e92231441b9/core-control/round-02/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "9ba3a57aa21010fc128d575e273ffef37da9d92769c7f3e720a7c85176875440"
+    }
+  ]
+}

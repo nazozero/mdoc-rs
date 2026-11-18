@@ -4,9 +4,13 @@ use crate::error::MdocError;
 use coset::{AsCborValue, RegisteredLabelWithPrivate, iana};
 
 pub mod key;
+mod structure;
 mod verify;
 
 pub use key::{CoseKeyExt, cose_alg_to_name};
+pub(crate) use structure::{mac0_structure, sign1_structure};
+#[cfg(feature = "issue")]
+pub(crate) use verify::verify_with_validated_key;
 pub use verify::{validate_verification_key, verify_cose_signature};
 
 /// Check wire labels and decode without normalizing tags into field types.
@@ -31,14 +35,11 @@ pub(crate) fn validate_headers(
     protected: &coset::ProtectedHeader,
     unprotected: &coset::Header,
 ) -> Result<i64, MdocError> {
-    let mut original_labels = 0;
     if let Some(original) = &protected.original_data {
         let decoded = if original.is_empty() {
             coset::Header::default()
         } else {
-            let (labels, decoded) = parse_header(crate::cbor::raw::Item::parse(original)?)?;
-            original_labels = labels;
-            decoded
+            parse_header(crate::cbor::raw::Item::parse(original)?)?.1
         };
         if decoded != protected.header {
             return Err(MdocError::Cose(
@@ -46,6 +47,16 @@ pub(crate) fn validate_headers(
             ));
         }
     }
+    validate_parsed_headers(protected, unprotected)
+}
+
+/// Check header semantics after the wire parser established the immutable
+/// protected bytes and decoded fields. Public mutable-model APIs use
+/// `validate_headers` to establish that binding before entering this path.
+pub(crate) fn validate_parsed_headers(
+    protected: &coset::ProtectedHeader,
+    unprotected: &coset::Header,
+) -> Result<i64, MdocError> {
     validate_critical_headers(protected, unprotected)?;
     if unprotected.alg.is_some() {
         return Err(MdocError::Cose(
@@ -60,8 +71,8 @@ pub(crate) fn validate_headers(
             ));
         }
     };
-    let mut seen = std::collections::BTreeSet::new();
-    for (index, header) in [&protected.header, unprotected].into_iter().enumerate() {
+    let mut seen = 0u64;
+    for header in [&protected.header, unprotected] {
         // Only alg, crit, kid and x5chain are processed by this profile.
         if header.content_type.is_some()
             || !header.iv.is_empty()
@@ -70,22 +81,25 @@ pub(crate) fn validate_headers(
         {
             return Err(MdocError::Cose("unsupported COSE security header".into()));
         }
-        let has_key_id =
-            !header.key_id.is_empty() || (index == 0 && original_labels & (1 << 4) != 0);
-        if has_key_id && !seen.insert(coset::Label::Int(4)) {
-            return Err(MdocError::Cose(
-                "duplicate header across protected/unprotected buckets".into(),
-            ));
+        // coset rejects an explicitly empty kid when parsing a header.
+        if !header.key_id.is_empty() {
+            if seen & (1 << 4) != 0 {
+                return Err(MdocError::Cose(
+                    "duplicate header across protected/unprotected buckets".into(),
+                ));
+            }
+            seen |= 1 << 4;
         }
         for (label, _) in &header.rest {
             if *label != coset::Label::Int(33) {
                 return Err(MdocError::Cose("unsupported COSE header extension".into()));
             }
-            if !seen.insert(label.clone()) {
+            if seen & (1 << 33) != 0 {
                 return Err(MdocError::Cose(
                     "duplicate header across protected/unprotected buckets".into(),
                 ));
             }
+            seen |= 1 << 33;
         }
     }
     Ok(algorithm)

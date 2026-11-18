@@ -1,0 +1,149 @@
+{
+  "unchanged_control": false,
+  "runs": [
+    {
+      "round": 1,
+      "position": 0,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-01/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    },
+    {
+      "round": 1,
+      "position": 1,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-candidate/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-01/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "d4eace027484d06a06cb97b8f28b992deb9e5f8137d2b96dcf378e0dfd870397"
+    },
+    {
+      "round": 2,
+      "position": 0,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-candidate/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-02/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "d4eace027484d06a06cb97b8f28b992deb9e5f8137d2b96dcf378e0dfd870397"
+    },
+    {
+      "round": 2,
+      "position": 1,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-02/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    },
+    {
+      "round": 3,
+      "position": 0,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-03/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    },
+    {
+      "round": 3,
+      "position": 1,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-candidate/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-03/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "d4eace027484d06a06cb97b8f28b992deb9e5f8137d2b96dcf378e0dfd870397"
+    },
+    {
+      "round": 4,
+      "position": 0,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-candidate/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-04/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "d4eace027484d06a06cb97b8f28b992deb9e5f8137d2b96dcf378e0dfd870397"
+    },
+    {
+      "round": 4,
+      "position": 1,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/comparison/round-04/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    }
+  ]
+}

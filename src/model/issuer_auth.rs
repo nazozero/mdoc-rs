@@ -11,22 +11,20 @@ use std::collections::HashMap;
 /// Issuer authentication (COSE_Sign1 containing the MSO).
 #[derive(Clone, Debug)]
 pub struct IssuerAuth {
-    /// Original COSE object, including the received protected-header and payload
-    /// bytes. Decoding its claims does not authenticate them.
+    /// COSE object retaining the received protected-header and payload bytes.
     pub cose_sign1: CoseSign1,
 }
 
 impl IssuerAuth {
-    /// Wrap a COSE object. This does not validate its signature or trust chain.
+    /// Wrap an unverified COSE object.
     pub fn new(cose_sign1: CoseSign1) -> Self {
         Self { cose_sign1 }
     }
 
     /// Parse the MSO from its mandatory Tag 24 payload.
     ///
-    /// The returned data is structurally checked, but remains unauthenticated
-    /// until the issuer signature has been verified. The original payload is
-    /// never replaced by re-encoded data.
+    /// Returns structurally checked data and preserves the original payload.
+    /// Authenticate the issuer signature before using the claims.
     pub fn mso(&self) -> Result<Mso, MdocError> {
         let payload = self
             .cose_sign1
@@ -41,8 +39,8 @@ impl IssuerAuth {
 
     /// Borrow the leaf certificate's DER from the unprotected x5chain header.
     ///
-    /// Every chain element is checked before returning the leaf. The certificate
-    /// remains untrusted; its presence cannot install a trust anchor.
+    /// Checks every container element. The returned certificate requires
+    /// application path validation against trusted issuers.
     pub fn certificate_der(&self) -> Result<&[u8], MdocError> {
         let value = self.x5chain()?;
         validate_cert_chain(value)?;
@@ -56,23 +54,23 @@ impl IssuerAuth {
         }
     }
 
-    /// Extract a checked representation of the untrusted certificate chain.
-    /// This checks the container, not DER syntax, certificate signatures or trust.
+    /// Extract certificate bytes in x5chain order after checking the container.
+    /// The caller validates DER, certificate signatures and issuer trust.
     pub fn certificate_chain_der(&self) -> Result<Vec<Vec<u8>>, MdocError> {
-        let value = self.x5chain()?;
-        validate_cert_chain(value)?;
-        match value {
-            Value::Bytes(bytes) => Ok(vec![bytes.clone()]),
-            Value::Array(chain) => chain
+        match self.x5chain()? {
+            Value::Bytes(bytes) if !bytes.is_empty() => Ok(vec![bytes.clone()]),
+            Value::Array(chain) if !chain.is_empty() => chain
                 .iter()
-                .map(|value| {
-                    value
-                        .as_bytes()
-                        .cloned()
-                        .ok_or_else(|| certificate_error("x5chain entry is not bytes"))
+                .map(|value| match value {
+                    Value::Bytes(bytes) if !bytes.is_empty() => Ok(bytes.clone()),
+                    _ => Err(certificate_error(
+                        "x5chain entries must be nonempty byte strings",
+                    )),
                 })
                 .collect(),
-            _ => Err(certificate_error("x5chain is not bytes or an array")),
+            _ => Err(certificate_error(
+                "x5chain must contain at least one nonempty certificate",
+            )),
         }
     }
 
@@ -154,21 +152,13 @@ fn into_text(value: Value, field: &str) -> Result<String, MdocError> {
     }
 }
 
-fn set_once<T>(slot: &mut Option<T>, value: T, field: &str) -> Result<(), MdocError> {
-    if slot.replace(value).is_some() {
-        return Err(mso_error(format!("duplicate {field}")));
-    }
-    Ok(())
-}
-
 fn required<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
     value.ok_or_else(|| mso_error(format!("missing {field}")))
 }
 
-/// Parse and validate the MSO schema for byte decoding and issuance preparation.
-/// Raw byte inputs must first pass `cbor::raw::validate`. Builders also validate
-/// their final encoding so arbitrary extension values cannot carry duplicate keys.
-pub(crate) fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
+/// Project an MSO whose complete encoding has passed raw CBOR validation,
+/// establishing unique map keys including extension values.
+fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     let mut version = None;
     let mut digest_algorithm = None;
     let mut doc_type = None;
@@ -181,22 +171,20 @@ pub(crate) fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     for (key, value) in into_map(value, "MSO")? {
         let key = into_text(key, "MSO key")?;
         match key.as_str() {
-            "version" => set_once(&mut version, into_text(value, &key)?, &key)?,
+            "version" => version = Some(into_text(value, &key)?),
             "digestAlgorithm" => {
                 let name = into_text(value, &key)?;
                 let algorithm = DigestAlgorithm::from_str_name(&name)
                     .ok_or(MdocError::UnsupportedAlgorithm(name))?;
-                set_once(&mut digest_algorithm, algorithm, &key)?;
+                digest_algorithm = Some(algorithm);
             }
-            "docType" => set_once(&mut doc_type, into_text(value, &key)?, &key)?,
-            "validityInfo" => set_once(&mut validity_info, parse_validity_info(value)?, &key)?,
-            "valueDigests" => set_once(&mut value_digests, parse_value_digests(value)?, &key)?,
-            "deviceKeyInfo" => set_once(&mut device_key_info, parse_device_key_info(value)?, &key)?,
-            "status" => set_once(&mut status, parse_status(value)?, &key)?,
+            "docType" => doc_type = Some(into_text(value, &key)?),
+            "validityInfo" => validity_info = Some(parse_validity_info(value)?),
+            "valueDigests" => value_digests = Some(parse_value_digests(value)?),
+            "deviceKeyInfo" => device_key_info = Some(parse_device_key_info(value)?),
+            "status" => status = Some(parse_status(value)?),
             _ => {
-                if additional_fields.insert(key, value).is_some() {
-                    return Err(mso_error("duplicate MSO extension"));
-                }
+                additional_fields.insert(key, value);
             }
         }
     }
@@ -253,18 +241,16 @@ fn parse_value_digests(value: Value) -> Result<HashMap<String, HashMap<u32, Vec<
             let Value::Bytes(digest) = digest else {
                 return Err(mso_error("digest value is not bytes"));
             };
-            if digests.insert(id, digest).is_some() {
-                return Err(mso_error("duplicate digestID"));
-            }
+            digests.insert(id, digest);
         }
-        if result.insert(namespace, digests).is_some() {
-            return Err(mso_error("duplicate valueDigests namespace"));
-        }
+        result.insert(namespace, digests);
     }
     Ok(result)
 }
 
-fn parse_status(value: Value) -> Result<MsoStatus, MdocError> {
+// The MSO decoder validates raw CBOR before this projection. Issuance validates
+// the resulting encoding before returning a prepared operation.
+pub(crate) fn parse_status(value: Value) -> Result<MsoStatus, MdocError> {
     let mechanisms = as_map(&value, "status")?;
     if mechanisms.is_empty() {
         return Err(mso_error("status must contain at least one mechanism"));
@@ -284,26 +270,22 @@ fn parse_status(value: Value) -> Result<MsoStatus, MdocError> {
                             .ok_or_else(|| {
                                 mso_error("status.status_list.idx must be an unsigned integer")
                             })?;
-                        set_once(&mut idx, index, "status.status_list.idx")?;
+                        idx = Some(index);
                     }
                     "uri" => {
                         let value = as_text(value, "status.status_list.uri")?;
                         iri_string::types::UriStr::new(value).map_err(|_| {
                             mso_error("status.status_list.uri must be an RFC 3986 URI")
                         })?;
-                        set_once(&mut uri, value.to_owned(), "status.status_list.uri")?;
+                        uri = Some(value.to_owned());
                     }
                     _ => {} // Retained in `raw`; application policy decides.
                 }
             }
-            set_once(
-                &mut status_list,
-                StatusListInfo {
-                    idx: required(idx, "status.status_list.idx")?,
-                    uri: required(uri, "status.status_list.uri")?,
-                },
-                "status.status_list",
-            )?;
+            status_list = Some(StatusListInfo {
+                idx: required(idx, "status.status_list.idx")?,
+                uri: required(uri, "status.status_list.uri")?,
+            });
         }
     }
     Ok(MsoStatus {
@@ -326,7 +308,7 @@ fn parse_validity_info(value: Value) -> Result<ValidityInfo, MdocError> {
             "expectedUpdate" => &mut expected_update,
             _ => return Err(mso_error("unsupported validityInfo member")),
         };
-        set_once(slot, parse_datetime(value)?, &key)?;
+        *slot = Some(parse_datetime(value)?);
     }
     let validity = ValidityInfo {
         signed: required(signed, "validityInfo.signed")?,
@@ -362,25 +344,19 @@ fn parse_device_key_info(value: Value) -> Result<DeviceKeyInfo, MdocError> {
             "deviceKey" => {
                 let key = CoseKey::from_cbor_value(value)
                     .map_err(|error| mso_error(format!("invalid device COSE_Key: {error}")))?;
-                set_once(&mut device_key, key, "deviceKey")?;
+                device_key = Some(key);
             }
-            "keyAuthorizations" => set_once(
-                &mut key_authorizations,
-                parse_key_authorizations(value)?,
-                &key,
-            )?,
+            "keyAuthorizations" => key_authorizations = Some(parse_key_authorizations(value)?),
             "keyInfo" => {
                 for (label, _) in as_map(&value, "keyInfo")? {
                     if label.as_integer().is_none() {
                         return Err(mso_error("keyInfo labels must be integers"));
                     }
                 }
-                set_once(&mut key_info, value, &key)?;
+                key_info = Some(value);
             }
             _ => {
-                if additional_fields.insert(key, value).is_some() {
-                    return Err(mso_error("duplicate deviceKeyInfo extension"));
-                }
+                additional_fields.insert(key, value);
             }
         }
     }
@@ -402,7 +378,7 @@ fn parse_key_authorizations(value: Value) -> Result<KeyAuthorizations, MdocError
     for (key, value) in fields {
         let key = into_text(key, "keyAuthorizations key")?;
         match key.as_str() {
-            "nameSpaces" => set_once(&mut name_spaces, parse_authorized_names(value)?, &key)?,
+            "nameSpaces" => name_spaces = Some(parse_authorized_names(value)?),
             "dataElements" => {
                 let namespaces = into_map(value, "authorized dataElements")?;
                 if namespaces.is_empty() {
@@ -411,14 +387,9 @@ fn parse_key_authorizations(value: Value) -> Result<KeyAuthorizations, MdocError
                 let mut elements = HashMap::with_capacity(namespaces.len());
                 for (namespace, names) in namespaces {
                     let namespace = into_text(namespace, "authorized namespace")?;
-                    if elements
-                        .insert(namespace, parse_authorized_names(names)?)
-                        .is_some()
-                    {
-                        return Err(mso_error("duplicate authorized namespace"));
-                    }
+                    elements.insert(namespace, parse_authorized_names(names)?);
                 }
-                set_once(&mut data_elements, elements, &key)?;
+                data_elements = Some(elements);
             }
             _ => return Err(mso_error("unsupported keyAuthorizations member")),
         }

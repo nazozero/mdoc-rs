@@ -29,8 +29,7 @@ pub enum DeviceResponseStatus {
 }
 
 impl DeviceResponseStatus {
-    /// Parse a defined status code without substituting a known value for an unknown code.
-    /// The caller decides whether a known error response is useful in its API.
+    /// Parse a defined status code; reject unknown codes.
     pub fn from_u8(val: u8) -> Option<Self> {
         match val {
             0 => Some(Self::Ok),

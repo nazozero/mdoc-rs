@@ -1,14 +1,15 @@
-//! UTC timestamps for protocol validation, backed by the maintained `time` crate.
+//! UTC timestamps for protocol validation, backed by `time`.
 //!
-//! Calendar validation, RFC 3339 parsing/formatting and Unix conversion are
-//! delegated to `time`. This small type retains the distinction between a whole
-//! positive leap second and the preceding ordinary second. Neither a leap
-//! second nor its ordering may silently become a Unix timestamp.
+//! `time` handles calendar validation and RFC 3339 parsing/formatting. This type
+//! preserves whole leap seconds and their ordering; Unix conversion returns
+//! `None` for a leap second. The MSO wire profile requires whole UTC seconds.
+//! [CGPM Resolution 5 (2026)] sets continuous UTC from 20 May 2027; historical
+//! [RFC 3339] leap-second values retain their representation and ordering.
 //!
-//! It does not implement calendar arithmetic, a leap-second schedule or a time
-//! zone database. The ISO MSO profile additionally requires whole UTC seconds.
+//! [CGPM Resolution 5 (2026)]: https://www.bipm.org/en/cgpm-2026/resolution-5
+//! [RFC 3339]: https://www.rfc-editor.org/rfc/rfc3339.html#section-5.7
 
-use ::time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
+use ::time::{OffsetDateTime, UtcDateTime, format_description::well_known::Rfc3339};
 use std::{cmp::Ordering, str::FromStr};
 
 use crate::MdocError;
@@ -22,23 +23,23 @@ use crate::MdocError;
 /// of the preceding ordinary second and before the following second.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Timestamp {
-    // Always UTC. A leap second stores the preceding ordinary second with
+    // A leap second stores the preceding ordinary second with
     // nanosecond zero; only this module can construct that representation.
-    utc: OffsetDateTime,
+    utc: UtcDateTime,
     leap_second: bool,
 }
 
 impl Timestamp {
     /// Construct an ordinary instant from Unix seconds, rejecting unsupported years.
     pub fn from_unix_seconds(seconds: i64) -> Result<Self, MdocError> {
-        let utc = OffsetDateTime::from_unix_timestamp(seconds)
+        let utc = UtcDateTime::from_unix_timestamp(seconds)
             .map_err(|_| invalid("Unix timestamp is out of range"))?;
         Self::checked(utc, false)
     }
 
     /// Construct an ordinary instant from Unix nanoseconds without truncating precision.
     pub fn from_unix_nanos(nanoseconds: i128) -> Result<Self, MdocError> {
-        let utc = OffsetDateTime::from_unix_timestamp_nanos(nanoseconds)
+        let utc = UtcDateTime::from_unix_timestamp_nanos(nanoseconds)
             .map_err(|_| invalid("Unix timestamp is out of range"))?;
         Self::checked(utc, false)
     }
@@ -46,12 +47,11 @@ impl Timestamp {
     /// Parse a bounded RFC 3339 timestamp and normalize its offset to UTC.
     ///
     /// This protocol API requires an uppercase `T` separator and at most nine
-    /// fractional digits. Extra digits reject instead of silently losing
-    /// precision before an issuer compares the original validity interval.
+    /// fractional digits. Extra digits reject to preserve interval precision.
     /// Ordinary fractional seconds are retained. Positive leap seconds must be
     /// whole seconds; fractional leap seconds are outside this protocol type.
     /// The `time` parser validates the calendar and possible UTC leap-second
-    /// position. No claim is made that an IERS table confirmed that occurrence.
+    /// position; checking an actual occurrence requires an external schedule.
     pub fn parse_rfc3339(text: &str) -> Result<Self, MdocError> {
         let bytes = text.as_bytes();
         if !(20..=35).contains(&bytes.len()) || bytes.get(10) != Some(&b'T') {
@@ -80,7 +80,7 @@ impl Timestamp {
             return Err(invalid("fractional leap seconds are unsupported"));
         }
         let utc = parsed
-            .checked_to_offset(UtcOffset::UTC)
+            .checked_to_utc()
             .ok_or_else(|| invalid("UTC timestamp is out of range"))?;
         let utc = if leap_second {
             // `time` maps second 60 to the preceding nanosecond. Retain an
@@ -140,7 +140,7 @@ impl Timestamp {
         (!self.leap_second).then(|| self.utc.unix_timestamp_nanos())
     }
 
-    fn checked(utc: OffsetDateTime, leap_second: bool) -> Result<Self, MdocError> {
+    fn checked(utc: UtcDateTime, leap_second: bool) -> Result<Self, MdocError> {
         if !(0..=9999).contains(&utc.year()) {
             return Err(invalid("timestamps require four-digit UTC years"));
         }

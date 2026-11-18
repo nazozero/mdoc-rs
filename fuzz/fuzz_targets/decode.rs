@@ -7,7 +7,9 @@ fuzz_target!(|input: &[u8]| {
         let _ = nazo_mdoc::cbor::date::FullDate::new(text);
     }
     let _ = nazo_mdoc::cbor::raw::validate(input);
-    let _ = nazo_mdoc::cbor::decode_cbor(input);
+    if let Ok(value) = nazo_mdoc::cbor::decode_cbor(input) {
+        let _ = nazo_mdoc::cbor::data_item::encode_cbor_canonical(&value);
+    }
     let _ = nazo_mdoc::session::SessionTranscript::from_cbor(input);
     if let Ok(response) = nazo_mdoc::parse(input) {
         for document in response.documents {
@@ -23,9 +25,8 @@ fuzz_target!(|input: &[u8]| {
             }
         }
     }
-    // Exercise COSE header/key/signature and certificate parsing behind the same
-    // bounded, byte-oriented admission APIs. The fixed context is a fuzz input
-    // parameter, not a claim that arbitrary presentations are trustworthy.
+    // Exercise COSE and certificate parsing through bounded verification APIs
+    // using a fixed transcript context.
     let transcript =
         nazo_mdoc::session::SessionTranscript::from_cbor(&[0x83, 0xf6, 0xf6, 0xf6]).unwrap();
     let options = nazo_mdoc::VerificationOptions {

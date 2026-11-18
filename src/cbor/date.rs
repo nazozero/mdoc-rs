@@ -28,16 +28,9 @@ impl FullDate {
             BorrowedFormatItem::StringLiteral("-"),
             BorrowedFormatItem::Component(Component::Day(modifier::Day::default())),
         ];
-        if date.len() != 10
-            || date.as_bytes()[4] != b'-'
-            || date.as_bytes()[7] != b'-'
-            || date
-                .as_bytes()
-                .iter()
-                .enumerate()
-                .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
-            || ::time::Date::parse(date, &format[..]).is_err()
-        {
+        // Fixed-width components validate digits, separators and calendar values.
+        // The length also excludes the parser's optional year sign.
+        if date.len() != 10 || ::time::Date::parse(date, &format[..]).is_err() {
             return Err(MdocError::Cbor("invalid full-date".into()));
         }
         Ok(Self(date.to_owned()))
@@ -93,5 +86,37 @@ mod tests {
         let val = Value::Text("2026-03-19".to_string());
         assert!(FullDate::from_cbor(&val).is_err());
         assert!(FullDate::new("2026-02-30").is_err());
+    }
+
+    #[test]
+    fn full_date_requires_exact_width_ascii_and_valid_calendar() {
+        for date in ["0000-01-01", "2000-02-29", "2024-02-29", "9999-12-31"] {
+            assert_eq!(FullDate::new(date).unwrap().as_str(), date);
+        }
+        for date in [
+            "",
+            "2026-1-18",
+            "2026-11-1",
+            "+2026-11-18",
+            "-2026-11-18",
+            "02026-11-18",
+            "2026/11/18",
+            "2026-11/18",
+            "202x-11-18",
+            "2026-1 -18",
+            "2026-11- 1",
+            "2026-11-18x",
+            "2026-11-18\n",
+            "2026-1é-1",
+            "２０２６-11-18",
+            "2026-00-18",
+            "2026-13-18",
+            "2026-11-00",
+            "2026-11-31",
+            "2026-02-29",
+            "1900-02-29",
+        ] {
+            assert!(FullDate::new(date).is_err(), "accepted {date:?}");
+        }
     }
 }

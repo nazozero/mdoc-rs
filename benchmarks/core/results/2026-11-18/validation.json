@@ -1,0 +1,169 @@
+{
+  "source": "a283838001cdee39f3608b935e88373190c5e3d9",
+  "source_tree": "3c451540dc4b37e455e758171894d94144d0d69c",
+  "tests_executed_before_git_publication": true,
+  "gates": [
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit": 0,
+      "elapsed_s": 0.4690023229995859
+    },
+    {
+      "name": "minimal",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-default-features"
+      ],
+      "exit": 0,
+      "elapsed_s": 10.290878368003177,
+      "passed_tests": 146
+    },
+    {
+      "name": "issue",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "issue"
+      ],
+      "exit": 0,
+      "elapsed_s": 23.122122422006214,
+      "passed_tests": 204
+    },
+    {
+      "name": "all",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--all-features"
+      ],
+      "exit": 0,
+      "elapsed_s": 12.288157488001161,
+      "passed_tests": 209
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "elapsed_s": 23.373197918997903
+    },
+    {
+      "name": "docs",
+      "command": [
+        "cargo",
+        "doc",
+        "--locked",
+        "--all-features",
+        "--no-deps"
+      ],
+      "exit": 0,
+      "elapsed_s": 11.570843874003913
+    },
+    {
+      "name": "wasm-minimal",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--no-default-features",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "exit": 0,
+      "elapsed_s": 34.89926005199959
+    },
+    {
+      "name": "wasm-issue",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "issue,wasm-js",
+        "--target",
+        "wasm32-unknown-unknown"
+      ],
+      "exit": 101,
+      "elapsed_s": 21.823765132001427,
+      "note": "Initial attempt stopped because the workspace disk was full. Generated build caches were removed; retry completed successfully.",
+      "retry": {
+        "exit": 0,
+        "elapsed_s": 39.11
+      }
+    },
+    {
+      "name": "wasi-issue",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "issue",
+        "--target",
+        "wasm32-wasip2"
+      ],
+      "exit": 0,
+      "log": "wasi-issue.log"
+    },
+    {
+      "name": "fuzz",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fuzz",
+        "run",
+        "decode",
+        "--",
+        "-max_total_time=120",
+        "-timeout=5",
+        "-max_len=65536",
+        "-rss_limit_mb=2048"
+      ],
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=0"
+      },
+      "exit": 0,
+      "executions": 120471,
+      "elapsed_s": 121,
+      "note": "The preceding default run completed 92007 inputs, then LeakSanitizer failed because this runner disallows ptrace. ASan remained enabled for the successful local rerun; CI uses sanitizer defaults.",
+      "previous_log": "fuzz-lsan-unsupported.log",
+      "log": "fuzz.log"
+    },
+    {
+      "name": "audit",
+      "command": [
+        "cargo",
+        "audit",
+        "--deny",
+        "warnings"
+      ],
+      "exit": 0,
+      "dependencies": 142,
+      "advisories": 1527,
+      "database_revision": "233155b4025b854c68a4b199c0e32d7fd53291a2",
+      "log": "audit.log"
+    }
+  ]
+}

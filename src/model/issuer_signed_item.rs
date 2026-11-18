@@ -24,12 +24,8 @@ pub struct IssuerSignedItem {
 impl IssuerSignedItem {
     /// Compute the digest of this item using the given algorithm.
     ///
-    /// ISO 18013-5 §9.1.2.5 mandates that the value digest is taken over the
-    /// `IssuerSignedItemBytes = #6.24(bstr .cbor IssuerSignedItem)` — i.e. the
-    /// **Tag-24-wrapped** encoding, not the bare item bytes. `self.encoded`
-    /// holds that complete tagged byte string. Its bytes
-    /// are hashed exactly as received, without constructing a replacement
-    /// envelope or re-encoding the inner map.
+    /// ISO 18013-5 §9.1.2.5 hashes the complete received
+    /// `IssuerSignedItemBytes = #6.24(bstr .cbor IssuerSignedItem)` in `encoded`.
     pub fn compute_digest(&self, alg: &DigestAlgorithm) -> Vec<u8> {
         use sha2::Digest;
         match alg {
@@ -41,10 +37,9 @@ impl IssuerSignedItem {
 
     /// Compare the hash of `encoded` with a supplied digest.
     ///
-    /// This checks only the original wire bytes. It does not authenticate the
-    /// MSO or establish that this public model's mutable decoded fields still
-    /// agree with those bytes. Use [`crate::verify_presentation`] or
-    /// [`crate::verifier::verify_issued`] to obtain authenticated decoded claims.
+    /// The comparison covers `encoded`; the MSO and mutable decoded fields
+    /// require separate authentication. Use [`crate::verify_presentation`] or
+    /// [`crate::verifier::verify_issued`] for authenticated decoded claims.
     pub fn verify_digest(&self, expected_digest: &[u8], alg: &DigestAlgorithm) -> bool {
         use sha2::Digest;
         match alg {

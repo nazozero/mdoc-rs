@@ -1,117 +1,86 @@
-# Production-baseline comparison harness
+# Historical baseline comparison
 
-This executable loads the exact NazoAuth production source revision
-`9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc` as `baseline` and the current
-`nazo-mdoc` checkout as `candidate`. Both use `default-features = false` and
-`features = ["issue"]`, in one release binary, on one pinned Linux thread.
-The independent workspace and lockfile keep benchmark-only dependencies out of
-the library and NazoAuth. The benchmark does not fetch status lists, hold production
-keys or issue production credentials.
+The harness compares `mdoc-rs` revision
+`9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc` with the current `nazo-mdoc` checkout.
+Both use `default-features = false, features = ["issue"]` in one release binary
+on a pinned Linux thread. The separate workspace keeps benchmark dependencies
+out of the library.
 
 ## Run
 
-Build separately from measurement, with an isolated target directory:
+Build before measuring:
 
 ```sh
 CARGO_BUILD_JOBS=2 cargo build --release --manifest-path benchmarks/compare/Cargo.toml --target-dir /absolute/path/target-mdoc-perf
 ```
 
-Check every operation, the independent fixture signatures, the known legacy
-DeviceAuthentication mismatch and the allocator instrumentation without reporting
-performance:
+Check operations, fixture signatures, known legacy output differences and
+allocator instrumentation:
 
 ```sh
 /absolute/path/target-mdoc-perf/release/nazo-mdoc-production-comparison --check
 ```
 
-After all other compiler/test jobs have finished, freeze source changes and run:
+Freeze source changes, finish compiler/test jobs, then measure:
 
 ```sh
 /absolute/path/target-mdoc-perf/release/nazo-mdoc-production-comparison --out /absolute/path/outside-repositories/mdoc-performance --samples 1000 --warmup 100
-```
-
-`--cpu N` chooses a permitted logical CPU. Without it, the harness chooses the
-first CPU in its allowed affinity set and pins its thread. Affinity and hardware
-identity are recorded. Pinning does not reserve that CPU or eliminate unrelated
-host load; preserve the execution log and describe the machine's load state.
-The harness requires at least 1,000 observations per variant and 16 warmups.
-For release evidence, use the documented default of 100 warmups or more.
-
-Output belongs outside source repositories. The harness writes:
-
-* `samples.csv`: every individual observation, actual AB/BA ordering and units.
-* `summary.csv`: nearest-rank P50/P95/P99 for wall and thread CPU nanoseconds,
-  plus allocation-count/byte medians and means.
-* `metadata.txt`: revision, dirty status, toolchain, source/binary/fixture hashes,
-  platform, CPU affinity, workload sizes and measurement semantics.
-* `source-manifest.txt`: hashes of the candidate and harness Rust/Cargo inputs.
-* `annex-d-response.cbor` and `synthetic-final-response.cbor`: the actual public
-  test presentations, saved after timing for independent corpus-hash checks.
-
-Render the recorded CSV values as a readable report with:
-
-```sh
 python3 benchmarks/compare/summarize.py /absolute/path/outside-repositories/mdoc-performance
 ```
 
-This writes `report.md` beside the measurements. It refuses inputs with fewer
-than 1,000 observations and supplies no substitute values for missing results.
+`--cpu N` selects a permitted logical CPU; the default is the first allowed CPU.
+Record host load alongside the saved hardware and affinity metadata. Use at
+least 1,000 observations per variant and 100 warmups for release evidence.
 
-A dirty source-tree hash is supporting evidence, not a replacement for committing
-and identifying the exact reviewed revision. Rebuild after code changes; do not
-label an old binary's results with a newer revision. The source snapshot is taken
-at the end of the run, so source must remain frozen from build through measurement.
+The output directory contains:
 
-## Measurement design
+- `samples.csv`: every observation, its units and actual AB/BA order.
+- `summary.csv`: nearest-rank P50/P95/P99 for elapsed and thread CPU nanoseconds,
+  plus allocation medians and means.
+- `metadata.txt`: revisions, dirty state, toolchain, source/binary/input hashes,
+  hardware, affinity and workload sizes.
+- `source-manifest.txt`: candidate and harness Rust/Cargo input hashes.
+- `annex-d-response.cbor` and `synthetic-final-response.cbor`: measured public
+  verification fixtures.
+- `report.md`: values rendered by the summarizer, which requires at least
+  1,000 observations per variant.
 
-Each paired case warms both paths in alternating order, then measures baseline
-first on even rounds and candidate first on odd rounds. Each observation runs
-one timing invocation and a **separate allocation invocation** of the same
-operation. Allocation counters are disabled in timing invocations. The system
-allocator wrapper remains present; its enabled-flag branch/load is common to
-both variants. This avoids charging timing for atomic counter increments while
-retaining a reproducible instrumented environment.
+Rebuild after source changes. Keep source frozen from build through measurement:
+the manifest is collected at the end of the run. Publish the exact committed
+source identity with the binary and input hashes.
 
-The timing invocation records `Instant` elapsed nanoseconds and Linux
-`CLOCK_THREAD_CPUTIME_ID` nanoseconds. The latter excludes time descheduled from
-the benchmark thread. Timer-call overhead is not subtracted; an empty control
-case exposes its scale. Small operations must be interpreted relative to that
-control. There are no harness-created background threads. Assertions check that
-measured verification paths actually succeed.
+## Measurement method
 
-The global allocator counts successful `alloc`, `alloc_zeroed` and `realloc`
-requests. Reallocation contributes one operation and the entire new requested
-size. `allocated_bytes` is therefore total requested capacity, **not** peak live
-heap, resident memory, retained memory or a count of bytes copied. Deallocation
-is performed normally, and output destruction is inside timing. The harness
-self-check requires a 1,024-byte Vec to register exactly one allocation and
-1,024 bytes; a nonallocating operation must register zero.
+Warmups alternate both paths. Measured even rounds run baseline first; odd
+rounds run candidate first. Each observation invokes the operation once for
+timing and once separately for allocation counting. Counters are disabled during
+timing; the allocator wrapper's enabled-flag branch is shared by both variants.
 
-Fixture preparation, signature generation for verification fixtures, preflight
-assertions, result-buffer allocations and file output are outside measured
-regions. Issuance intentionally includes real signing and its runtime randomness.
-Both issuance paths receive identical logical attributes, validity, issuer
-certificate and holder public key. Both concrete validity representations are
-constructed before measurement and cloned into their respective builders; the
-logical signed/expiry instants are asserted equal. Neither timed path parses,
-converts or adds fixture timestamps, so fixture date setup cannot
-favor one path. Random salts/digest IDs are generated by their respective
-production implementations, not replaced with a test RNG.
+`Instant` records elapsed time and `CLOCK_THREAD_CPUTIME_ID` records thread CPU
+time. An empty control exposes timer-call overhead. Output destruction is inside
+the measured region. Fixture setup, verification-fixture signatures, preflight
+assertions, measurement buffers and file output are outside it. Verification
+operations assert success.
 
-One-process compilation unifies shared Cargo dependency versions/features. This
-controls toolchain, cryptographic implementation and host differences while
-comparing the two library implementations. It does not reproduce two completely
-independent historical lockfiles, and it does not measure standalone library code
-size. Independent production dependency graphs/build artifacts and the NazoAuth
-adapter/interface benchmark are separate release evidence.
+The allocator counts successful `alloc`, `alloc_zeroed` and `realloc` calls.
+Requested bytes include the entire new capacity of each reallocation. Peak heap,
+retained memory, RSS and copied bytes require separate measurements. The
+allocator self-check checks one 1,024-byte allocation and a zero-allocation path.
 
-## Workloads and comparability
+Issuance includes real local signing and runtime randomness. Both variants use
+the same logical attributes, times, certificate and holder key. Their concrete
+validity values are constructed before timing and cloned into each builder.
+The measured operation uses each issuer's original salt and digest-ID generation.
 
-The Annex D bytes are the existing independent ISO fixture in
-`tests/vectors/iso_18013_5_annex_d_mdl.hex`. Both libraries consume those exact
-bytes. The public issuer signing fixture and deterministic holder test key come
-from `tests/common/mod.rs`; they are synthetic test material, not trusted issuer
-credentials. Full verification returns pending external trust.
+The shared binary unifies common Cargo versions and features. Independent
+lockfiles, dependency graphs and artifact sizes are measured by the consumers
+below. Report both elapsed and CPU quantiles and preserve every sample.
+
+## Workloads
+
+Annex D comes from `tests/vectors/iso_18013_5_annex_d_mdl.hex`. The synthetic
+issuer and holder fixtures come from `tests/common/mod.rs`. Full verification
+returns pending external trust.
 
 | Case | Same inputs / material difference |
 | --- | --- |
@@ -121,100 +90,64 @@ credentials. Full verification returns pending external trust.
 | `annex_d_disclosure_verify` | Same disclosures/digests. Candidate adds duplicate/random constraints and no longer allocates the old per-attribute report. |
 | `annex_d_cose_sig_structure` | Identical shared coset operation and byte-identical result; a useful unchanged-code control. |
 | `annex_d_cose_es256_verify` | Identical Sig_structure/signature/public key. Candidate adds algorithm/key-usage validation. |
-| `annex_d_leaf_certificate_access` | Baseline returns owned DER; candidate borrows DER after checking the full container. Zero allocations, if measured here, apply only to this narrow accessor. |
+| `annex_d_leaf_certificate_access` | Baseline returns owned DER; candidate borrows DER after checking the full container. |
 | `device_authentication_construct_raw_api` | Same transcript and logical empty namespaces. Baseline output lacks outer Tag 24; candidate output has the required wrapper and checks. **Different protocol outputs.** |
 | `device_authentication_construct_validated_api` | Same distinction; candidate consumes the transcript already validated outside measurement through its borrowed API. |
-| `final_device_signature_verify` | Both verify the exact same valid Final Tag 24 detached payload/signature. Baseline decodes an encoded COSE key; candidate borrows a parsed key and adds header/detached-mode constraints. This primitive comparison does not mean the old full verifier handles Final. |
-| `issue_two_attributes_es256` | Same logical issuance task and real local fixture signer. Candidate also validates certificate/schema, limits digest IDs to 31 bits, keeps complete Tag 24 envelopes and verifies the returned signature against the leaf certificate's public key. Baseline `sign` has no equivalent post-signing confirmation. Different acceptance rules and additional work are intentional. |
+| `final_device_signature_verify` | Both verify the exact same valid Final Tag 24 detached payload/signature. Baseline decodes an encoded COSE key; candidate borrows a parsed key and adds header/detached-mode constraints. |
+| `issue_two_attributes_es256` | Same logical issuance task and real local fixture signer. Candidate also validates certificate/schema, limits digest IDs to 31 bits, keeps complete Tag 24 envelopes and verifies the returned signature against the leaf certificate's public key. Baseline `sign` has no equivalent post-signing confirmation. |
 | `final_full_protocol_verification_pending_external_trust` | Candidate-only successful parse + issuer signature + digests + MSO/time + holder proof. No comparable baseline full-verifier number is reported. X.509 trust, certificate revocation, MSO-status HTTP and application admission are excluded. |
-| `final_redirect_transcript_validate_and_borrow` | Candidate-only Final redirect context hashing and exact-byte validation, with pointer identity asserted. Input and context construction occur before timing. Allocation results apply to this successful borrowed validator, not to transcript construction or complete credential verification. |
+| `final_redirect_transcript_validate_and_borrow` | Candidate-only Final redirect context hashing and exact-byte validation, with pointer identity asserted. Input and context construction occur before timing. |
 | `final_dc_api_transcript_validate_and_borrow` | The corresponding Final DC API validation, including the encryption-key thumbprint. The baseline has no equivalent Final context validator. |
 
-The preflight explicitly demonstrates that the unmodified baseline full verifier
-fails the holder-signature check for the Final fixture because of its legacy
-DeviceAuthentication construction. Measuring that failure and presenting it as a
-faster successful verification would be misleading. The real NazoAuth baseline
-adapter already performs compensating work and must be measured separately.
 
-The harness also checks that the old naked DeviceAuthentication output equals
-the inner bytes of the new Tag 24 envelope for the chosen empty-namespace fixture.
-That isolates the known protocol difference without silently repairing baseline
-source or pretending the outputs are interchangeable.
+Preflight confirms that the unchanged baseline full verifier fails holder
+verification of the Final fixture. The old DeviceAuthentication encoding matches
+the inner bytes of the candidate's complete Tag 24 envelope for the chosen empty
+namespaces. These rows have different output or acceptance contracts and must
+be reported separately.
 
-The issuance row is a library/local-signer comparison. NazoAuth's external-key
-path already checks returned signatures against the leased public JWK in
-`crates/key-management/src/external.rs`. The new core independently confirms
-completion against the issuer certificate's public key. Those statements are
-compatible: a previously checked JWK is not automatically evidence that the
-certificate key matches it, and the pre-existing local signing path did not
-perform that external-key check. This benchmark does not authorize skipping
-either required binding/check in the application. Endpoint measurements must
-name their actual local or external signer path.
+Issuance includes signature confirmation against the certificate key. External
+signers may additionally validate their own key-lease contract; integration
+measurements identify their actual signer path and those checks.
 
 ## Independent dependency and size measurements
 
-The two workspaces under `consumers/` include the identical
-`minimal_consumer.rs`. They link the real parser and accept the input path at
-runtime; neither can eliminate the parser because of a constant invalid input.
-They have independent dependency resolution, unlike the paired timing binary.
+The two workspaces under `consumers/` compile the same `minimal_consumer.rs`.
+They parse an input path supplied at runtime and resolve dependencies separately.
 
 ```sh
 python3 benchmarks/compare/collect_structure.py --evidence /absolute/path/outside-repositories/mdoc-performance --target /absolute/path/target-mdoc-size
 ```
 
-Use `--cargo /path/to/cargo --rustc /path/to/rustc` if necessary. The collector
-builds sequentially with one job: baseline production `issue`, candidate minimum,
-candidate `issue`, and candidate all features. It records Cargo's actual
-compiler-artifact filenames and sizes, successful Annex D consumer execution,
-normal dependency graph, source line counts, profile, binary hashes and build
-logs. The release profiles use the same optimization/LTO/codegen settings.
+`--cargo /path/to/cargo --rustc /path/to/rustc` selects explicit executables.
+The collector builds baseline `issue`, candidate minimum, candidate `issue` and
+candidate all-features sequentially with one job. Release opt-level, LTO and
+codegen settings match. It records actual compiler-artifact paths/sizes, binary
+hashes, source counts, build logs, normal dependency graphs and successful Annex
+D consumer runs.
 
-All consumers disable default features. The candidate minimum enables none;
-candidate `issue` enables only `issue`; candidate all-features enables `issue`,
-`debug` and `wasm-js`. Each standalone workspace has its own checked-in lockfile,
-so baseline/candidate feature unification cannot affect these counts or sizes.
-Normal dependency traversal is filtered to the actual host target: a native
-all-features result is not a WASM size or dependency result. These graphs describe
-the specified source revision and feature configuration resolved by these
-consumer lockfiles, not NazoAuth's complete workspace or an assertion that its
-historical lockfile was reproduced. The shared timing harness deliberately uses
-one unified graph, as described above; its dependency count and executable size
-must never be substituted for the standalone figures.
+All consumers disable default features. Candidate all-features enables `issue`,
+`debug` and `wasm-js`. Dependency traversal uses the actual target and excludes
+the core, dev/build edges and inactive target edges; distinct versions/sources
+and reachable proc macros count separately.
 
-Normal dependency counts exclude the library itself, dev/build edges and
-inactive target edges; distinct versions/sources count separately. Reachable
-proc-macro packages remain included. Rust source lines include comments and
-inline tests; nonblank lines are not a semantic code-only metric. Rlib sizes
-include compiled code/IR and metadata. Minimal parser consumer sizes describe
-that linked use case, not every exported capability. The generated
-`structure.md` and `structure.csv` keep these measures separate.
+`structure.csv` and `structure.md` distinguish Rust lines, rlib bytes and linked
+parser-binary bytes. Source lines include comments and inline tests. Rlibs contain
+code, IR and metadata. The combined timing binary has a unified graph and is
+recorded separately from these standalone artifacts.
 
-## Lockfile and advisory scope
+## Advisory checks
 
-The comparison, both consumers and the fuzz harness are independent,
-`publish = false` workspaces. Benchmark and fuzz directories are excluded from
-the library package. The comparison and baseline consumer intentionally retain
-the exact baseline source revision as reproducibility evidence; historical
-packages in those graphs are not candidate production dependencies. Do not
-upgrade baseline source to improve a security or performance comparison.
+Audit the library, comparison, both consumer and fuzz lockfiles independently.
+The comparison and baseline consumer retain the exact historical dependency
+revision; report their advisories separately from the current library. Record
+the advisory database revision, command, findings, warnings and yank status.
+Benchmark and fuzz workspaces are unpublished and excluded from the package.
 
-Audit each lockfile as well as the library and NazoAuth lockfiles. An audit of
-the candidate's production graph does not cover an auxiliary workspace, and
-the dependency count in an audit's complete lockfile is not the filtered normal
-dependency count in `structure.csv`. Keep the advisory database revision, command,
-actual finding/warning list and yank status with release evidence. An empty
-finding list is bounded by that database and execution date.
+## Reading results
 
-## Interpretation limits
-
-These are single-process microbenchmarks. Their latency percentiles are not
-HTTP endpoint P50/P95/P99, service capacity, a production SLA or a claim about
-allocation-free credential verification. No `speedup` is inferred from an
-unsupported baseline operation. Security-check additions may cost CPU or
-allocations and must remain visible. Report raw values and comparable ratios;
-identify different-contract rows separately.
-
-The combined executable size recorded in metadata is neither library's standalone
-size. Compare independently built artifacts for size/dependency claims. Preserve
-actual measurements outside the repositories, and put only this reproducible
-source and the method description in version control.
+These measurements describe the named library operations on the recorded host.
+Service throughput and endpoint latency require an integration workload.
+Compare ratios only for equivalent successful operations; retain rows with
+additional validation or different outputs under their actual contracts.
+Report remaining CPU, allocation, size and tail regressions with improvements.

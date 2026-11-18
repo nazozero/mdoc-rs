@@ -1,0 +1,23 @@
+[package]
+name = "mdoc-core-consumer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+license = "BSD-2-Clause"
+
+[workspace]
+
+[features]
+default = []
+baseline = ["dep:baseline"]
+candidate = ["dep:candidate"]
+
+[dependencies]
+baseline = { package = "nazo-mdoc", git = "https://github.com/nazozero/mdoc-rs", rev = "070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc", optional = true, default-features = false }
+candidate = { package = "nazo-mdoc", path = "../../..", optional = true, default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

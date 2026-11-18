@@ -1,7 +1,6 @@
 //! Strict DeviceResponse decoding. Authentication is a separate operation.
 //!
-//! Signed byte strings are copied once from their original wire slices; neither
-//! map order nor Tag 24 envelopes are reconstructed before digest verification.
+//! Signed byte strings retain their original map order and Tag 24 envelopes.
 
 use crate::{
     MdocError,
@@ -17,7 +16,7 @@ fn missing<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
     value.ok_or_else(|| error(&format!("missing {field}")))
 }
 
-/// Decode a bounded DeviceResponse; this does not authenticate its contents.
+/// Decode a bounded DeviceResponse. Use the verifier to authenticate its contents.
 pub fn parse(bytes: &[u8]) -> Result<DeviceResponse, MdocError> {
     parse_with_limits(bytes, Limits::default(), 16)
 }
@@ -127,7 +126,12 @@ fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, 
                 issuer_auth = Some(IssuerAuth::new(sign1));
             }
             "nameSpaces" => {
-                for entry in value.map()? {
+                let namespaces = value.map()?;
+                if namespaces.len() == 0 {
+                    return Err(error("empty issuer nameSpaces map"));
+                }
+                name_spaces.reserve(namespaces.len());
+                for entry in namespaces {
                     let (namespace, values) = entry?;
                     let namespace = namespace.text()?;
                     if namespace.is_empty() {
@@ -137,16 +141,14 @@ fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, 
                     if values.len() == 0 {
                         return Err(error("empty issuer namespace items"));
                     }
-                    let mut ids = HashSet::new();
-                    let mut identifiers = HashSet::new();
+                    let mut ids = HashSet::with_capacity(values.len());
+                    let mut identifiers = HashSet::with_capacity(values.len());
+                    salts.reserve(values.len());
                     let mut items = Vec::with_capacity(values.len());
                     for value in values {
                         items.push(parse_item(value?, &mut ids, &mut identifiers, &mut salts)?);
                     }
                     name_spaces.insert(namespace.to_owned(), items);
-                }
-                if name_spaces.is_empty() {
-                    return Err(error("empty issuer nameSpaces map"));
                 }
             }
             _ => return Err(error("unsupported IssuerSigned field")),
@@ -226,14 +228,17 @@ fn parse_device_signed(value: Item<'_>, limits: Limits) -> Result<DeviceSigned, 
             "deviceAuth" => device_auth = Some(parse_device_auth(value, limits)?),
             "nameSpaces" => {
                 namespace_bytes = Some(value.bytes().to_vec());
-                for entry in value.embedded()?.map()? {
+                let namespaces = value.embedded()?.map()?;
+                name_spaces.reserve(namespaces.len());
+                for entry in namespaces {
                     let (namespace, elements) = entry?;
                     let namespace = namespace.text()?;
                     if namespace.is_empty() {
                         return Err(error("empty device namespace"));
                     }
-                    let mut decoded = HashMap::new();
-                    for element in elements.map()? {
+                    let elements = elements.map()?;
+                    let mut decoded = HashMap::with_capacity(elements.len());
+                    for element in elements {
                         let (identifier, value) = element?;
                         let identifier = identifier.text()?;
                         if identifier.is_empty() {
