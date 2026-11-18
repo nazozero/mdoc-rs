@@ -290,9 +290,17 @@ pub fn build_device_authentication(
     let namespaces = raw::Item::parse(device_name_spaces_bytes)?.embedded()?;
     for namespace in namespaces.map()? {
         let (name, elements) = namespace?;
-        name.text()?;
-        for element in elements.map()? {
-            element?.0.text()?;
+        if name.text()?.is_empty() {
+            return Err(MdocError::Session("empty device namespace".into()));
+        }
+        let elements = elements.map()?;
+        if elements.len() == 0 {
+            return Err(MdocError::Session("empty DeviceSignedItems map".into()));
+        }
+        for element in elements {
+            if element?.0.text()?.is_empty() {
+                return Err(MdocError::Session("empty device element identifier".into()));
+            }
         }
     }
     Ok(build_device_authentication_validated(
