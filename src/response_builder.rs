@@ -7,14 +7,17 @@
 
 use std::collections::HashMap;
 
-use coset::{CborSerializable, CoseKey, CoseSign1, Header, HeaderBuilder, ProtectedHeader};
+use coset::{CoseSign1, Header, HeaderBuilder, ProtectedHeader};
 
 use crate::cbor::raw;
-use crate::cose::{validate_verification_key, verify_with_validated_key};
+use crate::cose::VerificationKey;
 use crate::error::MdocError;
 use crate::model::document::{DeviceSigned, IssuerSignedDocument};
-use crate::model::types::DeviceAuth;
-use crate::session::{SessionTranscript, build_device_authentication_validated};
+use crate::model::{
+    CborValueRef, CoseHeaderRef, CoseLabelRef, CoseSign1Ref, DeviceAuth, DeviceAuthRef,
+    DeviceSignedRef, IssuerSignedDocumentRef, MsoRef,
+};
+use crate::session::{DeviceAuthentication, SessionTranscript};
 
 /// A device-signature operation awaiting an externally produced signature.
 ///
@@ -25,9 +28,29 @@ pub struct PreparedDeviceAuthentication {
     document: IssuerSignedDocument,
     name_spaces: HashMap<String, HashMap<String, ciborium::Value>>,
     name_spaces_bytes: Vec<u8>,
+    signature: PreparedSignature,
+}
+
+/// Holder signing operation retaining borrowed credential and namespace fields.
+///
+/// `finish` writes the completed DeviceResponse directly, so these fields never
+/// need to become an owned credential model.
+#[derive(Debug)]
+#[must_use = "send signing_input to the holder's signer and complete with finish"]
+pub struct PreparedDeviceAuthenticationRef<'a> {
+    document: IssuerSignedDocumentRef<'a>,
+    name_spaces: DeviceNameSpacesRef<'a>,
+    name_spaces_bytes: &'a [u8],
+    signature: PreparedSignature,
+}
+
+type DeviceNameSpacesRef<'a> = HashMap<&'a str, HashMap<&'a str, CborValueRef<'a>>>;
+
+#[derive(Debug)]
+struct PreparedSignature {
     protected: ProtectedHeader,
     signing_input: Vec<u8>,
-    device_key: CoseKey,
+    device_key: VerificationKey,
     algorithm: i64,
 }
 
@@ -48,6 +71,78 @@ pub fn prepare_device_authentication(
     device_name_spaces_bytes: Vec<u8>,
     algorithm: i64,
 ) -> Result<PreparedDeviceAuthentication, MdocError> {
+    let mso = MsoRef::parse(
+        document
+            .issuer_signed
+            .issuer_auth
+            .cose_sign1
+            .payload
+            .as_deref()
+            .ok_or_else(|| MdocError::Mso("missing COSE_Sign1 payload".into()))?,
+    )?;
+    let (signature, name_spaces) = prepare_signature(
+        mso,
+        &document.doc_type,
+        transcript,
+        &device_name_spaces_bytes,
+        algorithm,
+    )?;
+    // The existing owned return contract requests independent decoded fields.
+    let name_spaces = name_spaces
+        .into_iter()
+        .map(|(namespace, elements)| {
+            Ok((
+                namespace.to_owned(),
+                elements
+                    .into_iter()
+                    .map(|(name, value)| Ok((name.to_owned(), value.to_owned()?)))
+                    .collect::<Result<_, MdocError>>()?,
+            ))
+        })
+        .collect::<Result<_, MdocError>>()?;
+    Ok(PreparedDeviceAuthentication {
+        document,
+        name_spaces,
+        name_spaces_bytes: device_name_spaces_bytes,
+        signature,
+    })
+}
+
+/// Prepare a holder signature without copying credential or namespace values.
+///
+/// The caller authenticates issuer trust, credential status and the request
+/// before selecting disclosures and passing this borrowed document. Both input
+/// buffers must remain alive through `finish`, which returns DeviceResponse
+/// bytes. `signing_input` is the one continuous message required by an external
+/// signer; no intermediate DeviceAuthentication buffer is constructed.
+pub fn prepare_device_authentication_borrowed<'a>(
+    document: IssuerSignedDocumentRef<'a>,
+    transcript: &SessionTranscript<'_>,
+    device_name_spaces_bytes: &'a [u8],
+    algorithm: i64,
+) -> Result<PreparedDeviceAuthenticationRef<'a>, MdocError> {
+    let (signature, name_spaces) = prepare_signature(
+        document.issuer_signed.issuer_auth.parsed_mso()?,
+        document.doc_type,
+        transcript,
+        device_name_spaces_bytes,
+        algorithm,
+    )?;
+    Ok(PreparedDeviceAuthenticationRef {
+        document,
+        name_spaces,
+        name_spaces_bytes: device_name_spaces_bytes,
+        signature,
+    })
+}
+
+fn prepare_signature<'a>(
+    mso: MsoRef<'_>,
+    doc_type: &str,
+    transcript: &SessionTranscript<'_>,
+    device_name_spaces_bytes: &'a [u8],
+    algorithm: i64,
+) -> Result<(PreparedSignature, DeviceNameSpacesRef<'a>), MdocError> {
     let assigned_algorithm = match algorithm {
         -7 => coset::iana::Algorithm::ES256,
         -35 => coset::iana::Algorithm::ES384,
@@ -59,64 +154,67 @@ pub fn prepare_device_authentication(
             )));
         }
     };
-    let mso = document.issuer_signed.issuer_auth.mso()?;
-    if mso.doc_type != document.doc_type {
+    if mso.doc_type != doc_type {
         return Err(MdocError::Mso("document docType differs from MSO".into()));
     }
-    validate_verification_key(&mso.device_key_info.device_key, algorithm)?;
-    let name_spaces = decode_namespaces(&device_name_spaces_bytes)?;
-    crate::verifier::check_key_authorizations(&mso.device_key_info, &name_spaces)?;
-    let payload = build_device_authentication_validated(
-        transcript,
-        &document.doc_type,
-        &device_name_spaces_bytes,
-    );
+    let device_key = VerificationKey::from_borrowed(&mso.device_key_info.device_key, algorithm)?;
+    let name_spaces = crate::parser::parse_device_namespaces(
+        raw::Item::parse(device_name_spaces_bytes)?.embedded()?,
+    )
+    .map_err(|error| match error {
+        MdocError::Parse(message) => MdocError::Issuance(message),
+        error => error,
+    })?;
+    for (namespace, elements) in &name_spaces {
+        crate::verifier::check_key_authorizations(
+            &mso.device_key_info,
+            namespace,
+            elements.keys().copied(),
+        )?;
+    }
+    let payload = DeviceAuthentication::new(transcript, doc_type, device_name_spaces_bytes);
     let header = HeaderBuilder::new().algorithm(assigned_algorithm).build();
+    let mut encoded_header = Vec::new();
+    crate::cose::push_header(&mut encoded_header, &header)?;
     let protected = ProtectedHeader {
-        original_data: Some(header.clone().to_vec()?),
+        original_data: Some(encoded_header),
         header,
     };
-    let signing_input = crate::cose::sign1_structure(&protected, &payload)?;
-    Ok(PreparedDeviceAuthentication {
-        document,
+    let signing_input = crate::cose::with_protected_bytes(&protected, |bytes| {
+        let framing = crate::cose::AuthenticationStructure::sign1(bytes.len(), payload.len());
+        Ok(payload.authentication_parts(framing.prefix(bytes)).concat())
+    })?;
+    Ok((
+        PreparedSignature {
+            protected,
+            signing_input,
+            device_key,
+            algorithm,
+        },
         name_spaces,
-        name_spaces_bytes: device_name_spaces_bytes,
-        protected,
-        signing_input,
-        device_key: mso.device_key_info.device_key,
-        algorithm,
-    })
+    ))
 }
 
 impl PreparedDeviceAuthentication {
     /// Exact COSE Sig_structure bytes to send to the external signer.
     /// ECDSA signers return fixed-width raw `r || s`, not ASN.1 DER.
     pub fn signing_input(&self) -> &[u8] {
-        &self.signing_input
+        &self.signature.signing_input
     }
 
     /// Protected COSE algorithm of this signing operation.
     pub fn algorithm(&self) -> i64 {
-        self.algorithm
+        self.signature.algorithm
     }
 
     /// Verify the external signature and attach a detached COSE_Sign1 proof.
     /// A wrong key, altered input, DER-encoded ECDSA value, or invalid signature
     /// cannot produce a successfully completed document.
     pub fn finish(mut self, signature: Vec<u8>) -> Result<IssuerSignedDocument, MdocError> {
-        if !verify_with_validated_key(
-            &self.signing_input,
-            &signature,
-            &self.device_key,
-            self.algorithm,
-        )? {
-            return Err(MdocError::Signature(
-                "external holder signature does not match signing input and device key".into(),
-            ));
-        }
+        self.signature.verify(&signature)?;
         self.document.device_signed = Some(DeviceSigned {
             device_auth: DeviceAuth::Signature(CoseSign1 {
-                protected: self.protected,
+                protected: self.signature.protected,
                 unprotected: Header::default(),
                 payload: None,
                 signature,
@@ -128,33 +226,57 @@ impl PreparedDeviceAuthentication {
     }
 }
 
-fn decode_namespaces(
-    encoded: &[u8],
-) -> Result<HashMap<String, HashMap<String, ciborium::Value>>, MdocError> {
-    let namespaces = raw::Item::parse(encoded)?.embedded()?.map()?;
-    let mut decoded = HashMap::with_capacity(namespaces.len());
-    for namespace in namespaces {
-        let (name, elements) = namespace?;
-        let name = name.text()?;
-        if name.is_empty() {
-            return Err(MdocError::Issuance("empty device namespace".into()));
-        }
-        let elements = elements.map()?;
-        let mut values = HashMap::with_capacity(elements.len());
-        for element in elements {
-            let (name, value) = element?;
-            let name = name.text()?;
-            if name.is_empty() {
-                return Err(MdocError::Issuance(
-                    "empty device element identifier".into(),
-                ));
-            }
-            values.insert(name.to_owned(), value.value()?);
-        }
-        if values.is_empty() {
-            return Err(MdocError::Issuance("empty DeviceSignedItems map".into()));
-        }
-        decoded.insert(name.to_owned(), values);
+impl PreparedDeviceAuthenticationRef<'_> {
+    /// Exact COSE Sig_structure bytes to send to the external signer.
+    /// ECDSA signers return fixed-width raw `r || s`, not ASN.1 DER.
+    pub fn signing_input(&self) -> &[u8] {
+        &self.signature.signing_input
     }
-    Ok(decoded)
+
+    pub fn algorithm(&self) -> i64 {
+        self.signature.algorithm
+    }
+
+    /// Verify an external signature and write the complete DeviceResponse.
+    /// Writes borrowed credential fields, device values and the signature into
+    /// the output buffer, without constructing an owned credential model.
+    pub fn finish(self, signature: &[u8]) -> Result<Vec<u8>, MdocError> {
+        self.signature.verify(signature)?;
+        let document = IssuerSignedDocumentRef {
+            doc_type: self.document.doc_type,
+            issuer_signed: self.document.issuer_signed,
+            device_signed: Some(DeviceSignedRef {
+                device_auth: DeviceAuthRef::Signature(CoseSign1Ref {
+                    protected: self
+                        .signature
+                        .protected
+                        .original_data
+                        .as_deref()
+                        .expect("preparation retains encoded protected headers"),
+                    protected_header: CoseHeaderRef {
+                        alg: Some(CoseLabelRef::Int(self.signature.algorithm)),
+                        labels: 1 << 1,
+                        ..Default::default()
+                    },
+                    unprotected: CoseHeaderRef::default(),
+                    payload: None,
+                    signature,
+                }),
+                name_spaces: self.name_spaces,
+                name_spaces_bytes: self.name_spaces_bytes,
+            }),
+        };
+        document.to_device_response_cbor()
+    }
+}
+
+impl PreparedSignature {
+    fn verify(&self, signature: &[u8]) -> Result<(), MdocError> {
+        if !self.device_key.verify(&[&self.signing_input], signature)? {
+            return Err(MdocError::Signature(
+                "external holder signature does not match signing input and device key".into(),
+            ));
+        }
+        Ok(())
+    }
 }

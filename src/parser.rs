@@ -31,12 +31,26 @@ pub fn parse_with_limits(
     limits: Limits,
     max_documents: usize,
 ) -> Result<DeviceResponse, MdocError> {
+    parse_borrowed_with_limits(bytes, limits, max_documents)?.into_owned()
+}
+
+/// Decode a DeviceResponse while borrowing its strings, byte strings and claims.
+pub fn parse_borrowed(bytes: &[u8]) -> Result<DeviceResponseRef<'_>, MdocError> {
+    parse_borrowed_with_limits(bytes, Limits::default(), 16)
+}
+
+/// Borrow a DeviceResponse under caller-selected CBOR and document limits.
+pub fn parse_borrowed_with_limits(
+    bytes: &[u8],
+    limits: Limits,
+    max_documents: usize,
+) -> Result<DeviceResponseRef<'_>, MdocError> {
     let root = Item::parse_with_limits(bytes, limits)?;
     let (mut version, mut status, mut documents) = (None, None, None);
     for entry in root.map()? {
         let (key, value) = entry?;
         match key.text()? {
-            "version" => version = Some(value.text()?.to_owned()),
+            "version" => version = Some(value.text()?),
             "status" => {
                 status = Some(
                     u8::try_from(value.uint()?)
@@ -62,7 +76,7 @@ pub fn parse_with_limits(
         }
     }
     let status = missing(status, "status")?;
-    Ok(DeviceResponse {
+    Ok(DeviceResponseRef {
         version: missing(version, "version")?,
         status: DeviceResponseStatus::from_u8(status)
             .ok_or_else(|| error("unknown DeviceResponse status"))?,
@@ -70,12 +84,15 @@ pub fn parse_with_limits(
     })
 }
 
-fn parse_document(value: Item<'_>, limits: Limits) -> Result<IssuerSignedDocument, MdocError> {
+fn parse_document(
+    value: Item<'_>,
+    limits: Limits,
+) -> Result<IssuerSignedDocumentRef<'_>, MdocError> {
     let (mut doc_type, mut issuer_signed, mut device_signed) = (None, None, None);
     for entry in value.map()? {
         let (key, value) = entry?;
         match key.text()? {
-            "docType" => doc_type = Some(value.text()?.to_owned()),
+            "docType" => doc_type = Some(value.text()?),
             "issuerSigned" => issuer_signed = Some(parse_issuer_signed(value, limits)?),
             "deviceSigned" => device_signed = Some(parse_device_signed(value, limits)?),
             _ => return Err(error("unsupported Document field")),
@@ -85,7 +102,7 @@ fn parse_document(value: Item<'_>, limits: Limits) -> Result<IssuerSignedDocumen
     if doc_type.is_empty() {
         return Err(error("empty docType"));
     }
-    Ok(IssuerSignedDocument {
+    Ok(IssuerSignedDocumentRef {
         doc_type,
         issuer_signed: missing(issuer_signed, "issuerSigned")?,
         device_signed,
@@ -104,10 +121,22 @@ pub fn parse_issued(bytes: &[u8]) -> Result<IssuerSigned, MdocError> {
 /// header map and embedded MSO payload. Item/depth budgets restart at each
 /// COSE byte-string envelope; Tag 24 shares its enclosing envelope's budget.
 pub fn parse_issued_with_limits(bytes: &[u8], limits: Limits) -> Result<IssuerSigned, MdocError> {
+    parse_issued_borrowed_with_limits(bytes, limits)?.into_owned()
+}
+
+/// Borrow the IssuerSigned map used by OpenID4VCI A.2.4.
+pub fn parse_issued_borrowed(bytes: &[u8]) -> Result<IssuerSignedRef<'_>, MdocError> {
+    parse_issued_borrowed_with_limits(bytes, Limits::default())
+}
+
+pub fn parse_issued_borrowed_with_limits(
+    bytes: &[u8],
+    limits: Limits,
+) -> Result<IssuerSignedRef<'_>, MdocError> {
     parse_issuer_signed(Item::parse_with_limits(bytes, limits)?, limits)
 }
 
-fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, MdocError> {
+fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSignedRef<'_>, MdocError> {
     let mut issuer_auth = None;
     let mut name_spaces = HashMap::new();
     let mut salts = HashSet::new();
@@ -116,14 +145,28 @@ fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, 
         match key.text()? {
             "issuerAuth" => {
                 let sign1 = parse_sign1(value, limits)?;
-                if let Some(payload) = &sign1.payload {
+                let validated_mso_payload = sign1
+                    .payload
+                    .map(|payload| Item::parse_with_limits(payload, limits))
+                    .transpose()?;
+                if let Some(payload) = validated_mso_payload {
                     // COSE payload is an opaque bstr to the outer CBOR scan.
                     // Check its known MSO envelope before any claim decoding.
-                    Item::parse_with_limits(payload, limits)?
-                        .embedded()?
-                        .map()?;
+                    payload.embedded()?.map()?;
                 }
-                issuer_auth = Some(IssuerAuth::new(sign1));
+                // Operations without a Limits parameter retain the default
+                // budget. A proof from looser parsing cannot establish that.
+                let defaults = Limits::default();
+                let validated_mso_payload = validated_mso_payload.filter(|_| {
+                    limits.max_bytes <= defaults.max_bytes
+                        && limits.max_depth <= defaults.max_depth
+                        && limits.max_items <= defaults.max_items
+                        && limits.max_collection_items <= defaults.max_collection_items
+                });
+                issuer_auth = Some(IssuerAuthRef {
+                    cose_sign1: sign1,
+                    validated_mso_payload,
+                });
             }
             "nameSpaces" => {
                 let namespaces = value.map()?;
@@ -148,13 +191,13 @@ fn parse_issuer_signed(value: Item<'_>, limits: Limits) -> Result<IssuerSigned, 
                     for value in values {
                         items.push(parse_item(value?, &mut ids, &mut identifiers, &mut salts)?);
                     }
-                    name_spaces.insert(namespace.to_owned(), items);
+                    name_spaces.insert(namespace, items);
                 }
             }
             _ => return Err(error("unsupported IssuerSigned field")),
         }
     }
-    Ok(IssuerSigned {
+    Ok(IssuerSignedRef {
         issuer_auth: missing(issuer_auth, "issuerAuth")?,
         name_spaces,
     })
@@ -165,7 +208,7 @@ fn parse_item<'a>(
     ids: &mut HashSet<u32>,
     identifiers: &mut HashSet<&'a str>,
     salts: &mut HashSet<&'a [u8]>,
-) -> Result<IssuerSignedItem, MdocError> {
+) -> Result<IssuerSignedItemRef<'a>, MdocError> {
     let encoded = value.bytes();
     let inner = value.embedded()?;
     let (mut digest_id, mut random, mut element_identifier, mut element_value) =
@@ -194,7 +237,7 @@ fn parse_item<'a>(
                 }
                 element_identifier = Some(identifier);
             }
-            "elementValue" => element_value = Some(value.value()?),
+            "elementValue" => element_value = Some(CborValueRef::from_item(value)),
             _ => return Err(error("unsupported IssuerSignedItem field")),
         }
     }
@@ -208,18 +251,16 @@ fn parse_item<'a>(
     if !salts.insert(random) {
         return Err(error("reused IssuerSignedItem random"));
     }
-    // The uniqueness sets borrow the input; only the public owned model copies
-    // these fields. No reference to an item being moved into the vector escapes.
-    Ok(IssuerSignedItem {
+    Ok(IssuerSignedItemRef {
         digest_id,
-        random: random.to_vec(),
-        element_identifier: element_identifier.to_owned(),
+        random,
+        element_identifier,
         element_value,
-        encoded: encoded.to_vec(),
+        encoded,
     })
 }
 
-fn parse_device_signed(value: Item<'_>, limits: Limits) -> Result<DeviceSigned, MdocError> {
+fn parse_device_signed(value: Item<'_>, limits: Limits) -> Result<DeviceSignedRef<'_>, MdocError> {
     let (mut device_auth, mut namespace_bytes) = (None, None);
     let mut name_spaces = HashMap::new();
     for entry in value.map()? {
@@ -227,63 +268,70 @@ fn parse_device_signed(value: Item<'_>, limits: Limits) -> Result<DeviceSigned, 
         match key.text()? {
             "deviceAuth" => device_auth = Some(parse_device_auth(value, limits)?),
             "nameSpaces" => {
-                namespace_bytes = Some(value.bytes().to_vec());
-                let namespaces = value.embedded()?.map()?;
-                name_spaces.reserve(namespaces.len());
-                for entry in namespaces {
-                    let (namespace, elements) = entry?;
-                    let namespace = namespace.text()?;
-                    if namespace.is_empty() {
-                        return Err(error("empty device namespace"));
-                    }
-                    let elements = elements.map()?;
-                    let mut decoded = HashMap::with_capacity(elements.len());
-                    for element in elements {
-                        let (identifier, value) = element?;
-                        let identifier = identifier.text()?;
-                        if identifier.is_empty() {
-                            return Err(error("empty device elementIdentifier"));
-                        }
-                        decoded.insert(identifier.to_owned(), value.value()?);
-                    }
-                    if decoded.is_empty() {
-                        return Err(error("empty DeviceSignedItems map"));
-                    }
-                    name_spaces.insert(namespace.to_owned(), decoded);
-                }
+                namespace_bytes = Some(value.bytes());
+                name_spaces = parse_device_namespaces(value.embedded()?)?;
             }
             _ => return Err(error("unsupported DeviceSigned field")),
         }
     }
-    Ok(DeviceSigned {
+    Ok(DeviceSignedRef {
         device_auth: missing(device_auth, "deviceAuth")?,
         name_spaces,
         name_spaces_bytes: missing(namespace_bytes, "DeviceNameSpacesBytes")?,
     })
 }
 
-struct CoseFields {
-    protected: coset::ProtectedHeader,
-    unprotected: coset::Header,
-    payload: Option<Vec<u8>>,
-    authentication: Vec<u8>,
+pub(crate) fn parse_device_namespaces(
+    value: Item<'_>,
+) -> Result<HashMap<&str, HashMap<&str, CborValueRef<'_>>>, MdocError> {
+    let namespaces = value.map()?;
+    let mut name_spaces = HashMap::with_capacity(namespaces.len());
+    for entry in namespaces {
+        let (namespace, elements) = entry?;
+        let namespace = namespace.text()?;
+        if namespace.is_empty() {
+            return Err(error("empty device namespace"));
+        }
+        let elements = elements.map()?;
+        let mut decoded = HashMap::with_capacity(elements.len());
+        for element in elements {
+            let (identifier, value) = element?;
+            let identifier = identifier.text()?;
+            if identifier.is_empty() {
+                return Err(error("empty device elementIdentifier"));
+            }
+            decoded.insert(identifier, CborValueRef::from_item(value));
+        }
+        if decoded.is_empty() {
+            return Err(error("empty DeviceSignedItems map"));
+        }
+        name_spaces.insert(namespace, decoded);
+    }
+    Ok(name_spaces)
 }
 
-fn parse_cose(value: Item<'_>, limits: Limits) -> Result<CoseFields, MdocError> {
+struct CoseFields<'a> {
+    protected: &'a [u8],
+    protected_header: CoseHeaderRef<'a>,
+    unprotected: CoseHeaderRef<'a>,
+    payload: Option<&'a [u8]>,
+    authentication: &'a [u8],
+}
+
+fn parse_cose(value: Item<'_>, limits: Limits) -> Result<CoseFields<'_>, MdocError> {
     let mut fields = value.array()?;
     if fields.len() != 4 {
         return Err(error("COSE structure must contain four fields"));
     }
     let protected = fields.next().expect("four fields")?.bstr()?;
-    let (protected_labels, protected_header) = if protected.is_empty() {
-        (0, coset::Header::default())
+    let protected_header = if protected.is_empty() {
+        CoseHeaderRef::default()
     } else {
         // Protected headers are a bstr, not Tag 24, so validate their map here.
-        crate::cose::parse_header(Item::parse_with_limits(protected, limits)?)?
+        CoseHeaderRef::parse(Item::parse_with_limits(protected, limits)?)?
     };
-    let (unprotected_labels, unprotected) =
-        crate::cose::parse_header(fields.next().expect("four fields")?)?;
-    if protected_labels & unprotected_labels != 0 {
+    let unprotected = CoseHeaderRef::parse(fields.next().expect("four fields")?)?;
+    if protected_header.labels & unprotected.labels != 0 {
         return Err(MdocError::Cose(
             "duplicate header across protected/unprotected buckets".into(),
         ));
@@ -292,41 +340,41 @@ fn parse_cose(value: Item<'_>, limits: Limits) -> Result<CoseFields, MdocError> 
     let payload = if payload.bytes() == [0xf6] {
         None
     } else {
-        Some(payload.bstr()?.to_vec())
+        Some(payload.bstr()?)
     };
     Ok(CoseFields {
-        protected: coset::ProtectedHeader {
-            original_data: Some(protected.to_vec()),
-            header: protected_header,
-        },
+        protected,
+        protected_header,
         unprotected,
         payload,
-        authentication: fields.next().expect("four fields")?.bstr()?.to_vec(),
+        authentication: fields.next().expect("four fields")?.bstr()?,
     })
 }
 
-fn parse_sign1(value: Item<'_>, limits: Limits) -> Result<coset::CoseSign1, MdocError> {
+fn parse_sign1(value: Item<'_>, limits: Limits) -> Result<CoseSign1Ref<'_>, MdocError> {
     let fields = parse_cose(value, limits)?;
-    Ok(coset::CoseSign1 {
+    Ok(CoseSign1Ref {
         protected: fields.protected,
+        protected_header: fields.protected_header,
         unprotected: fields.unprotected,
         payload: fields.payload,
         signature: fields.authentication,
     })
 }
 
-fn parse_device_auth(value: Item<'_>, limits: Limits) -> Result<DeviceAuth, MdocError> {
+fn parse_device_auth(value: Item<'_>, limits: Limits) -> Result<DeviceAuthRef<'_>, MdocError> {
     let mut map = value.map()?;
     let (key, value) = map.next().ok_or_else(|| error("empty deviceAuth"))??;
     if map.next().is_some() {
         return Err(error("deviceAuth must contain exactly one mechanism"));
     }
     match key.text()? {
-        "deviceSignature" => Ok(DeviceAuth::Signature(parse_sign1(value, limits)?)),
+        "deviceSignature" => Ok(DeviceAuthRef::Signature(parse_sign1(value, limits)?)),
         "deviceMac" => {
             let fields = parse_cose(value, limits)?;
-            Ok(DeviceAuth::Mac(coset::CoseMac0 {
+            Ok(DeviceAuthRef::Mac(CoseMac0Ref {
                 protected: fields.protected,
+                protected_header: fields.protected_header,
                 unprotected: fields.unprotected,
                 payload: fields.payload,
                 tag: fields.authentication,

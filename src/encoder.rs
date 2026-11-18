@@ -4,9 +4,11 @@
 //! `DeviceNameSpacesBytes`, protected COSE headers and COSE payloads retain their
 //! original bytes. Use the verifier APIs to authenticate encoded documents.
 
-use coset::CborSerializable;
+mod borrowed;
+pub use borrowed::{encode_device_response_borrowed, encode_issuer_signed_borrowed};
 
 use crate::cbor::raw::{self, push_bytes, push_head, push_text};
+use crate::cose::{push_header, push_protected_header};
 use crate::error::MdocError;
 use crate::model::device_response::{DeviceResponse, DeviceResponseStatus};
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
@@ -24,14 +26,8 @@ fn push_cose(
     signature_or_tag: &[u8],
 ) -> Result<(), MdocError> {
     out.push(0x84);
-    if let Some(original) = &protected.original_data {
-        push_bytes(out, original);
-    } else if protected.is_empty() {
-        out.push(0x40);
-    } else {
-        push_bytes(out, &protected.header.clone().to_vec()?);
-    }
-    out.extend_from_slice(&unprotected.clone().to_vec()?);
+    push_protected_header(out, protected)?;
+    push_header(out, unprotected)?;
     if let Some(payload) = payload {
         push_bytes(out, payload);
     } else {
@@ -186,5 +182,130 @@ impl IssuerSignedDocument {
         push_document(&mut out, self)?;
         raw::validate(&out)?;
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ciborium::Value;
+    use coset::{AsCborValue, CborSerializable};
+
+    fn headers() -> (coset::ProtectedHeader, coset::Header) {
+        (
+            coset::ProtectedHeader {
+                original_data: Some(hex::decode("a204430102030126").unwrap()),
+                header: coset::HeaderBuilder::new()
+                    .algorithm(coset::iana::Algorithm::ES256)
+                    .key_id(vec![1, 2, 3])
+                    .build(),
+            },
+            coset::HeaderBuilder::new()
+                .text_value(
+                    "extension".into(),
+                    Value::Tag(42, Box::new(Value::Bool(true))),
+                )
+                .value(
+                    33,
+                    Value::Array(vec![
+                        Value::Bytes(vec![0x5a; 65_536]),
+                        Value::Bytes(vec![0x6b; 256]),
+                    ]),
+                )
+                .build(),
+        )
+    }
+
+    #[test]
+    fn borrowed_cose_wire_encoding_matches_independent_coset_sign1_and_mac0() {
+        let (protected, unprotected) = headers();
+        for original_data in [protected.original_data.clone(), None, Some(Vec::new())] {
+            let protected = coset::ProtectedHeader {
+                original_data,
+                header: protected.header.clone(),
+            };
+            for payload in [None, Some(Vec::new()), Some(vec![0x7c; 65_536])] {
+                let proof = vec![0x8d; 64];
+                let mut actual = Vec::new();
+                push_cose(
+                    &mut actual,
+                    &protected,
+                    &unprotected,
+                    payload.as_deref(),
+                    &proof,
+                )
+                .unwrap();
+                assert_eq!(
+                    actual,
+                    coset::CoseSign1 {
+                        protected: protected.clone(),
+                        unprotected: unprotected.clone(),
+                        payload: payload.clone(),
+                        signature: proof.clone(),
+                    }
+                    .to_vec()
+                    .unwrap()
+                );
+                assert_eq!(
+                    actual,
+                    coset::CoseMac0 {
+                        protected: protected.clone(),
+                        unprotected: unprotected.clone(),
+                        payload,
+                        tag: proof,
+                    }
+                    .to_vec()
+                    .unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn public_issuer_encoder_preserves_coset_extension_values_and_errors() {
+        let (protected, unprotected) = headers();
+        let mut issuer_signed = IssuerSigned {
+            issuer_auth: crate::model::IssuerAuth::new(coset::CoseSign1 {
+                protected,
+                unprotected,
+                payload: Some(vec![0x7c; 256]),
+                signature: vec![0x8d; 64],
+            }),
+            name_spaces: Default::default(),
+        };
+        let expected = Value::Map(vec![(
+            Value::Text("issuerAuth".into()),
+            issuer_signed
+                .issuer_auth
+                .cose_sign1
+                .clone()
+                .to_cbor_value()
+                .unwrap(),
+        )]);
+        let mut expected_bytes = Vec::new();
+        ciborium::into_writer(&expected, &mut expected_bytes).unwrap();
+        assert_eq!(
+            encode_issuer_signed(&issuer_signed).unwrap(),
+            expected_bytes
+        );
+
+        issuer_signed
+            .issuer_auth
+            .cose_sign1
+            .unprotected
+            .rest
+            .push((coset::Label::Int(33), Value::Bytes(vec![0x99])));
+        assert!(matches!(
+            encode_issuer_signed(&issuer_signed),
+            Err(MdocError::Cose(_))
+        ));
+
+        let unprotected = &mut issuer_signed.issuer_auth.cose_sign1.unprotected;
+        unprotected.rest = vec![(coset::Label::Int(4), Value::Bytes(vec![2]))];
+        unprotected.key_id = vec![1];
+        assert!(matches!(
+            encode_issuer_signed(&issuer_signed),
+            Err(MdocError::Cbor(_))
+        ));
     }
 }

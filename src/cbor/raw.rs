@@ -225,6 +225,35 @@ impl<'a> Item<'a> {
         self.bytes
     }
 
+    pub(crate) fn as_integer(self) -> Option<i128> {
+        match self.bytes[0] >> 5 {
+            0 => Some(i128::from(header(self.bytes).expect("validated header").1)),
+            1 => Some(-1 - i128::from(header(self.bytes).expect("validated header").1)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_text(self) -> Option<&'a str> {
+        (self.bytes[0] >> 5 == 3).then(|| self.text().expect("validated text"))
+    }
+
+    pub(crate) fn as_bytes(self) -> Option<&'a [u8]> {
+        (self.bytes[0] >> 5 == 2).then(|| self.bstr().expect("validated byte string"))
+    }
+
+    pub(crate) fn tagged(self) -> Result<(u64, Self), MdocError> {
+        let (major, tag, head) = header(self.bytes)?;
+        if major != 6 {
+            return Err(error("expected CBOR tag"));
+        }
+        Ok((
+            tag,
+            Self {
+                bytes: &self.bytes[head..],
+            },
+        ))
+    }
+
     pub(crate) fn text(self) -> Result<&'a str, MdocError> {
         let (major, _, head) = header(self.bytes)?;
         if major != 3 {
@@ -420,22 +449,33 @@ impl ExactSizeIterator for Map<'_> {}
 
 /// Append a shortest CBOR integer/length header without constructing a Value.
 pub(crate) fn push_head(out: &mut Vec<u8>, major: u8, value: u64) {
-    let prefix = major << 5;
+    let (bytes, length) = cbor_head(major, value);
+    out.extend_from_slice(&bytes[..length]);
+}
+
+pub(crate) fn cbor_head(major: u8, value: u64) -> ([u8; 9], usize) {
+    let mut bytes = [0; 9];
+    let length = head_len(value);
+    let additional = match length {
+        1 => value as u8,
+        2 => 24,
+        3 => 25,
+        5 => 26,
+        _ => 27,
+    };
+    let width = length - 1;
+    bytes[0] = (major << 5) | additional;
+    bytes[1..1 + width].copy_from_slice(&value.to_be_bytes()[8 - width..]);
+    (bytes, length)
+}
+
+pub(crate) const fn head_len(value: u64) -> usize {
     match value {
-        0..=23 => out.push(prefix | value as u8),
-        24..=255 => out.extend_from_slice(&[prefix | 24, value as u8]),
-        256..=65_535 => {
-            out.push(prefix | 25);
-            out.extend_from_slice(&(value as u16).to_be_bytes());
-        }
-        65_536..=4_294_967_295 => {
-            out.push(prefix | 26);
-            out.extend_from_slice(&(value as u32).to_be_bytes());
-        }
-        _ => {
-            out.push(prefix | 27);
-            out.extend_from_slice(&value.to_be_bytes());
-        }
+        0..=23 => 1,
+        24..=0xff => 2,
+        0x100..=0xffff => 3,
+        0x1_0000..=0xffff_ffff => 5,
+        _ => 9,
     }
 }
 
@@ -447,13 +487,4 @@ pub(crate) fn push_text(out: &mut Vec<u8>, value: &str) {
 pub(crate) fn push_bytes(out: &mut Vec<u8>, value: &[u8]) {
     push_head(out, 2, value.len() as u64);
     out.extend_from_slice(value);
-}
-
-#[cfg(feature = "issue")]
-pub(crate) fn wrap_tag24_bytes(inner: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(inner.len() + 11);
-    out.extend_from_slice(&[0xd8, 0x18]);
-    push_head(&mut out, 2, inner.len() as u64);
-    out.extend_from_slice(inner);
-    out
 }

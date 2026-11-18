@@ -1,7 +1,7 @@
 # Architecture
 
-`nazo-mdoc` is one library with a shared `DeviceResponse` model for parsing and
-encoding. Applications provide signing, trust policy, credential status and
+`nazo-mdoc` is one library with borrowed protocol views and explicit owned
+models for independent storage. Applications provide signing, trust policy, credential status and
 transport.
 
 ## Verification flow
@@ -14,11 +14,11 @@ transport.
 3. `verifier` authenticates the issuer signature using the leaf certificate key,
    decodes the signed MSO, authenticates the holder against the supplied
    transcript, then checks disclosure digests, authorizations and validity.
-4. `PendingTrustDocument` exposes immutable authenticated data and the leaf-first
-   certificate chain. The application checks issuer trust, certificate
+4. `PendingTrustDocumentRef` exposes immutable authenticated views and leaf-first
+   certificate slices. The application checks issuer trust, certificate
    revocation, credential status, request freshness and authorization.
 
-`verify_presentation` and `verify_issued` authenticate wire bytes and keep parsed
+`verify_presentation_borrowed` and `verify_issued_borrowed` authenticate wire bytes and keep parsed
 documents private until validation completes. Their disclosure path reuses the
 parser's digest-ID, identifier and salt checks. `verify_disclosure` accepts
 caller-mutable models and repeats those checks; its caller supplies an
@@ -42,18 +42,33 @@ already signed fields verbatim.
 
 ## Ownership
 
-- Validated `SessionTranscript` values borrow their input. Final validators hash
-  the supplied context and compare its framing directly with received bytes.
-- Credential models own the data applications retain after releasing a request
-  buffer. MSO projection moves strings, digests and key parameters into the model.
-- Received Tag 24 envelopes, COSE protected headers and MSO payloads remain
-  available in their original byte representation.
-- Uniqueness checks borrow names and salts for the duration of validation.
-- Status retains the complete CBOR extension and a typed projection of a known
-  reference. The application can inspect unknown members before resolving it.
-- Pending results own a leaf-first certificate chain as well as the document's
-  COSE object, allowing `into_parts` to transfer both representations. Leaf-only
-  access borrows DER.
+- Parsing stores text, byte strings, signed envelopes and claim values as slices
+  or `CborValueRef` into the caller's buffer. MSO parsing uses the same bounded
+  views and stores references in its namespace and digest indexes.
+- The parser retains a private proof for the checked MSO payload only when the
+  original `max_bytes`, `max_depth`, `max_items` and `max_collection_items` are
+  each no greater than `Limits::default()`. Internal authentication and borrowed
+  holder preparation reuse it only while the payload has the same slice address
+  and length. A looser original limit or a replaced payload takes the default
+  validation path. Public `mso()` always performs that validation independently.
+- Authenticated borrowed results keep their fields private and expose read-only
+  access. `into_parts` moves indexes without copying their referenced data.
+- `into_owned` copies into independent storage. The old owned APIs use this
+  conversion after the shared borrowed path. Their certificate-chain return
+  contract retains a separate owned chain alongside the owned COSE headers.
+- ECDSA verification hashes message fragments through RustCrypto's multipart
+  interface. HMAC updates from the same borrowed framing. Ed25519 retains strict
+  verification and assembles its required contiguous message.
+- The upstream X.509 decoder owns its decoded certificate fields. Issuer public
+  points go directly from SPKI to the cryptographic verification key. Prepared
+  signing operations retain that key rather than rebuilding a COSE key.
+- Issuance moves attributes into the result and encodes item and MSO Tag 24
+  envelopes directly into their final buffers. Digests use stack outputs;
+  namespace sorting retains references. Holder preparation writes one final
+  signing input from its component slices.
+- Borrowed encoders preserve original signed bytes. Borrowed holder preparation
+  consumes a document view and returns final response bytes after signature
+  confirmation, without constructing an owned credential in between.
 
 ## Time and policy
 

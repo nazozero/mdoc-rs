@@ -71,9 +71,18 @@ pub(crate) fn verify_device_signature(
             "deviceSignature must use a detached payload".into(),
         ));
     }
-    let sig_structure =
-        crate::cose::sign1_structure(&sign1.protected, device_authentication_bytes)?;
-    crate::cose::verify_cose_signature(&sig_structure, &sign1.signature, device_key, algorithm)
+    crate::cose::with_protected_bytes(&sign1.protected, |protected| {
+        let framing = crate::cose::AuthenticationStructure::sign1(
+            protected.len(),
+            device_authentication_bytes.len(),
+        );
+        crate::cose::verify_cose_signature_parts(
+            &framing.parts(protected, device_authentication_bytes),
+            &sign1.signature,
+            device_key,
+            algorithm,
+        )
+    })
 }
 
 /// Check an HMAC-256/256 COSE_Mac0 using an externally derived EMacKey.
@@ -85,7 +94,7 @@ pub fn verify_device_mac(
     device_authentication_bytes: &[u8],
     mac_key: &[u8; 32],
 ) -> Result<DeviceAuthResult, MdocError> {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
 
     if mac0.payload.is_some() {
@@ -109,17 +118,18 @@ pub fn verify_device_mac(
 
     crate::cose::validate_headers(&mac0.protected, &mac0.unprotected)?;
 
-    let mac_structure = crate::cose::mac0_structure(&mac0.protected, device_authentication_bytes)?;
-
-    // Compute HMAC-SHA256
-    let mut hmac = Hmac::<Sha256>::new_from_slice(mac_key)
-        .map_err(|e| MdocError::DeviceAuth(format!("HMAC init: {e}")))?;
-    hmac.update(&mac_structure);
-
-    // Verify against tag
-    let tag = &mac0.tag;
-
-    let is_valid = hmac.verify_slice(tag).is_ok();
+    let is_valid = crate::cose::with_protected_bytes(&mac0.protected, |protected| {
+        let framing = crate::cose::AuthenticationStructure::mac0(
+            protected.len(),
+            device_authentication_bytes.len(),
+        );
+        let mut hmac = Hmac::<Sha256>::new_from_slice(mac_key)
+            .map_err(|e| MdocError::DeviceAuth(format!("HMAC init: {e}")))?;
+        for part in framing.parts(protected, device_authentication_bytes) {
+            hmac.update(part);
+        }
+        Ok(hmac.verify_slice(&mac0.tag).is_ok())
+    })?;
 
     Ok(DeviceAuthResult {
         is_valid,
@@ -141,7 +151,7 @@ mod tests {
         device_authentication: &[u8],
         key: &[u8; 32],
     ) -> coset::CoseMac0 {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
 
         let protected = coset::ProtectedHeader {

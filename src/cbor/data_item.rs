@@ -21,6 +21,52 @@ pub fn encode_cbor(value: &Value) -> Result<Vec<u8>, MdocError> {
     Ok(buf)
 }
 
+/// Measure canonical output without materializing or visiting byte contents.
+#[cfg(feature = "issue")]
+pub(crate) fn encoded_len(value: &Value) -> Result<usize, MdocError> {
+    encoded_len_at_depth(value, 0)
+}
+
+#[cfg(feature = "issue")]
+fn encoded_len_at_depth(value: &Value, depth: usize) -> Result<usize, MdocError> {
+    use crate::cbor::raw::{Limits, head_len};
+    let limits = Limits::default();
+    if depth > limits.max_depth {
+        return Err(MdocError::Cbor("CBOR nesting limit exceeded".into()));
+    }
+    let add = |left: usize, right: usize| {
+        left.checked_add(right)
+            .filter(|len| *len <= limits.max_bytes)
+            .ok_or_else(|| MdocError::Cbor("CBOR byte limit exceeded".into()))
+    };
+    match value {
+        Value::Bytes(bytes) => add(head_len(bytes.len() as u64), bytes.len()),
+        Value::Text(text) => add(head_len(text.len() as u64), text.len()),
+        Value::Array(items) => items
+            .iter()
+            .try_fold(head_len(items.len() as u64), |len, item| {
+                add(len, encoded_len_at_depth(item, depth + 1)?)
+            }),
+        Value::Map(entries) => {
+            entries
+                .iter()
+                .try_fold(head_len(entries.len() as u64), |len, (key, value)| {
+                    key_order(key)?;
+                    let len = add(len, encoded_len_at_depth(key, depth + 1)?)?;
+                    add(len, encoded_len_at_depth(value, depth + 1)?)
+                })
+        }
+        Value::Tag(tag, value) => add(head_len(*tag), encoded_len_at_depth(value, depth + 1)?),
+        scalar => {
+            // Native integers, floats, bool and null need at most nine bytes.
+            let mut bytes = [0u8; 9];
+            let mut out = std::io::Cursor::new(bytes.as_mut_slice());
+            ciborium::into_writer(scalar, &mut out)?;
+            Ok(out.position() as usize)
+        }
+    }
+}
+
 /// Encode a value to **deterministic (canonical) CBOR** bytes.
 ///
 /// This crate emits RFC 8949 core deterministic encoding for issuance.
@@ -166,6 +212,45 @@ pub fn decode_tag24(value: &Value) -> Result<Value, MdocError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "issue")]
+    #[test]
+    fn measured_length_matches_canonical_output_without_unbounded_recursion() {
+        for size in [0, 23, 24, 255, 256, 65_535, 65_536] {
+            let value = Value::Map(vec![
+                ("portrait".into(), Value::Bytes(vec![0x42; size])),
+                (
+                    "values".into(),
+                    Value::Array(vec![
+                        Value::Integer(u64::MAX.into()),
+                        Value::Integer((-(1i128 << 64)).try_into().unwrap()),
+                        Value::Float(1.5),
+                        Value::Float(f64::NAN),
+                        Value::Tag(1004, Box::new("2026-11-18".into())),
+                        true.into(),
+                        Value::Null,
+                    ]),
+                ),
+            ]);
+            assert_eq!(
+                encoded_len(&value).unwrap(),
+                encode_cbor_canonical(&value).unwrap().len()
+            );
+        }
+        let mut nested = Value::Null;
+        for _ in 0..64 {
+            nested = Value::Array(vec![nested]);
+        }
+        assert!(encoded_len(&nested).is_err());
+        assert!(
+            encoded_len(&Value::Bytes(vec![
+                0;
+                crate::cbor::raw::Limits::default()
+                    .max_bytes
+            ]))
+            .is_err()
+        );
+    }
 
     #[test]
     fn tag24_round_trip() {

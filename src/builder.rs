@@ -5,7 +5,7 @@ use der::Decode;
 use std::collections::{HashMap, HashSet};
 
 use crate::cbor::data_item;
-use crate::cbor::raw::{push_bytes, push_head, push_text};
+use crate::cbor::raw::{head_len, push_bytes, push_head, push_text};
 use crate::error::MdocError;
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
 use crate::model::issuer_auth::IssuerAuth;
@@ -26,8 +26,7 @@ pub struct DocumentBuilder {
 pub struct PreparedDocument {
     document: IssuerSignedDocument,
     signing_input: Vec<u8>,
-    issuer_key: coset::CoseKey,
-    algorithm: i64,
+    issuer_key: crate::cose::VerificationKey,
 }
 
 impl PreparedDocument {
@@ -38,12 +37,7 @@ impl PreparedDocument {
 
     /// Attach the external signature after checking it against the leaf key.
     pub fn finish(mut self, signature: Vec<u8>) -> Result<IssuerSignedDocument, MdocError> {
-        if !crate::cose::verify_with_validated_key(
-            &self.signing_input,
-            &signature,
-            &self.issuer_key,
-            self.algorithm,
-        )? {
+        if !self.issuer_key.verify(&[&self.signing_input], &signature)? {
             return Err(MdocError::Signature(
                 "external issuer signature does not match signing input/certificate".into(),
             ));
@@ -163,7 +157,6 @@ impl DocumentBuilder {
         validity.validate()?;
 
         let mut name_spaces = HashMap::with_capacity(self.name_spaces.len());
-        let mut value_digests = HashMap::with_capacity(self.name_spaces.len());
         if self.doc_type.is_empty() || self.name_spaces.is_empty() {
             return Err(MdocError::Issuance(
                 "docType and at least one namespace are required".into(),
@@ -178,9 +171,10 @@ impl DocumentBuilder {
         }
         let leaf = x509_cert::Certificate::from_der(&certificate_chain[0])
             .map_err(|e| MdocError::Certificate(e.to_string()))?;
-        let issuer_key =
-            crate::cose::key::cose_key_from_spki(&leaf.tbs_certificate.subject_public_key_info)?;
-        crate::cose::validate_verification_key(&issuer_key, algorithm.cose_id())?;
+        let issuer_key = crate::cose::VerificationKey::from_spki(
+            leaf.tbs_certificate().subject_public_key_info(),
+            algorithm.cose_id(),
+        )?;
         let interval = crate::verifier::certificate_interval(&leaf)?;
         if validity.signed < interval.0 || validity.signed > interval.1 {
             return Err(MdocError::Validity(
@@ -203,7 +197,6 @@ impl DocumentBuilder {
                 }
             }
             let mut items = Vec::with_capacity(attributes.len());
-            let mut ns_digests = HashMap::with_capacity(attributes.len());
             for (elem_id, elem_value) in attributes {
                 let (digest_id, random) =
                     fresh_item_randomness(&mut used_digest_ids, &mut used_randoms)?;
@@ -216,34 +209,20 @@ impl DocumentBuilder {
                     encoded,
                 };
 
-                let digest = item.compute_digest(&self.digest_algorithm);
-
-                ns_digests.insert(digest_id, digest);
                 items.push(item);
             }
 
-            name_spaces.insert(namespace.clone(), items);
-            value_digests.insert(namespace, ns_digests);
+            name_spaces.insert(namespace, items);
         }
 
-        let mso_map = build_mso_cbor(
+        let mso_bytes = encode_mso(
             &self.doc_type,
             &self.digest_algorithm,
             &validity,
-            value_digests,
+            &name_spaces,
             device_key,
-            self.status
-                .map(crate::model::issuer_auth::parse_status)
-                .transpose()?
-                .map(|status| status.raw),
+            self.status,
         )?;
-
-        // The builder established the field semantics above. Check uniqueness
-        // and limits once on the complete Tag 24 envelope after encoding.
-        let mut mso_inner = Vec::new();
-        data_item::write_canonical(&mso_map, &mut mso_inner, 0)?;
-        let mso_bytes = crate::cbor::raw::wrap_tag24_bytes(&mso_inner);
-        crate::cbor::raw::validate(&mso_bytes)?;
         let alg = match algorithm {
             CoseAlgorithm::ES256 => iana::Algorithm::ES256,
             CoseAlgorithm::ES384 => iana::Algorithm::ES384,
@@ -287,93 +266,162 @@ impl DocumentBuilder {
             },
             signing_input,
             issuer_key,
-            algorithm: algorithm.cose_id(),
         })
     }
 }
 
-/// Build the MSO as a CBOR Value.
-fn build_mso_cbor(
+fn text_len(value: &str) -> usize {
+    head_len(value.len() as u64) + value.len()
+}
+
+fn tag24_output(inner_len: usize) -> Result<Vec<u8>, MdocError> {
+    let total = 2usize
+        .checked_add(head_len(inner_len as u64))
+        .and_then(|len| len.checked_add(inner_len))
+        .filter(|len| *len <= crate::cbor::raw::Limits::default().max_bytes)
+        .ok_or_else(|| MdocError::Cbor("CBOR byte limit exceeded".into()))?;
+    let mut out = Vec::with_capacity(total);
+    push_head(&mut out, 6, 24);
+    push_head(&mut out, 2, inner_len as u64);
+    Ok(out)
+}
+
+fn write_date(out: &mut Vec<u8>, formatted: &str) {
+    push_head(out, 6, 0);
+    push_text(out, formatted);
+}
+
+/// Encode the fixed MSO schema directly from the issued items. Only the sorted
+/// indexes own metadata; namespace text, claim data and digests are not cloned.
+fn encode_mso(
     doc_type: &str,
     digest_algorithm: &DigestAlgorithm,
     validity: &ValidityInfo,
-    value_digests: HashMap<String, HashMap<u32, Vec<u8>>>,
+    name_spaces: &HashMap<String, Vec<IssuerSignedItem>>,
     device_key: coset::CoseKey,
     status: Option<ciborium::Value>,
-) -> Result<ciborium::Value, MdocError> {
-    let mut vd_entries = Vec::with_capacity(value_digests.len());
-    for (ns, digests) in value_digests {
-        let mut digest_entries = Vec::with_capacity(digests.len());
-        for (id, digest) in digests {
-            digest_entries.push((
-                ciborium::Value::Integer(ciborium::value::Integer::from(id)),
-                ciborium::Value::Bytes(digest),
-            ));
+) -> Result<Vec<u8>, MdocError> {
+    use sha2::Digest;
+
+    let key = device_key.to_cbor_value()?;
+    let key_len = data_item::encoded_len(&key)?;
+    let status_len = status.as_ref().map(data_item::encoded_len).transpose()?;
+    let dates = [
+        validity.signed.format_rfc3339()?,
+        validity.valid_from.format_rfc3339()?,
+        validity.valid_until.format_rfc3339()?,
+    ];
+    let update = validity
+        .expected_update
+        .map(|time| time.format_rfc3339())
+        .transpose()?;
+    let digest_len = digest_algorithm.output_size();
+    let digests_len = head_len(name_spaces.len() as u64)
+        + name_spaces
+            .iter()
+            .map(|(name, items)| {
+                text_len(name)
+                    + head_len(items.len() as u64)
+                    + items
+                        .iter()
+                        .map(|item| {
+                            head_len(u64::from(item.digest_id))
+                                + head_len(digest_len as u64)
+                                + digest_len
+                        })
+                        .sum::<usize>()
+            })
+            .sum::<usize>();
+    let validity_len = 1
+        + ["signed", "validFrom", "validUntil"]
+            .iter()
+            .zip(&dates)
+            .map(|(name, date)| text_len(name) + 1 + text_len(date))
+            .sum::<usize>()
+        + update
+            .as_ref()
+            .map_or(0, |date| text_len("expectedUpdate") + 1 + text_len(date));
+    let inner_len = 1
+        + text_len("docType")
+        + text_len(doc_type)
+        + text_len("version")
+        + text_len("1.0")
+        + text_len("valueDigests")
+        + digests_len
+        + text_len("validityInfo")
+        + validity_len
+        + text_len("deviceKeyInfo")
+        + 1
+        + text_len("deviceKey")
+        + key_len
+        + text_len("digestAlgorithm")
+        + text_len(digest_algorithm.name())
+        + status_len.map_or(0, |len| text_len("status") + len);
+    let mut out = tag24_output(inner_len)?;
+    push_head(&mut out, 5, if status.is_some() { 7 } else { 6 });
+    // Fixed text keys in RFC 8949 deterministic order (encoded length, bytes).
+    if let Some(status) = &status {
+        push_text(&mut out, "status");
+        data_item::write_canonical(status, &mut out, 1)?;
+    }
+    push_text(&mut out, "docType");
+    push_text(&mut out, doc_type);
+    push_text(&mut out, "version");
+    push_text(&mut out, "1.0");
+    push_text(&mut out, "validityInfo");
+    push_head(&mut out, 5, if update.is_some() { 4 } else { 3 });
+    for (name, date) in ["signed", "validFrom", "validUntil"].iter().zip(&dates) {
+        push_text(&mut out, name);
+        write_date(&mut out, date);
+    }
+    if let Some(date) = update {
+        push_text(&mut out, "expectedUpdate");
+        write_date(&mut out, &date);
+    }
+    push_text(&mut out, "valueDigests");
+    push_head(&mut out, 5, name_spaces.len() as u64);
+    let mut namespaces: Vec<_> = name_spaces.iter().collect();
+    namespaces.sort_unstable_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+    for (namespace, items) in namespaces {
+        push_text(&mut out, namespace);
+        push_head(&mut out, 5, items.len() as u64);
+        let mut items: Vec<_> = items.iter().collect();
+        items.sort_unstable_by_key(|item| item.digest_id);
+        for item in items {
+            push_head(&mut out, 0, u64::from(item.digest_id));
+            match digest_algorithm {
+                DigestAlgorithm::Sha256 => {
+                    push_bytes(&mut out, &sha2::Sha256::digest(&item.encoded))
+                }
+                DigestAlgorithm::Sha384 => {
+                    push_bytes(&mut out, &sha2::Sha384::digest(&item.encoded))
+                }
+                DigestAlgorithm::Sha512 => {
+                    push_bytes(&mut out, &sha2::Sha512::digest(&item.encoded))
+                }
+            }
         }
-        vd_entries.push((
-            ciborium::Value::Text(ns),
-            ciborium::Value::Map(digest_entries),
-        ));
     }
+    push_text(&mut out, "deviceKeyInfo");
+    out.push(0xa1);
+    push_text(&mut out, "deviceKey");
+    data_item::write_canonical(&key, &mut out, 2)?;
+    push_text(&mut out, "digestAlgorithm");
+    push_text(&mut out, digest_algorithm.name());
+    debug_assert_eq!(out.len(), 2 + head_len(inner_len as u64) + inner_len);
 
-    let mut validity_entries = vec![
-        (
-            ciborium::Value::Text("signed".to_string()),
-            tdate(&validity.signed)?,
-        ),
-        (
-            ciborium::Value::Text("validFrom".to_string()),
-            tdate(&validity.valid_from)?,
-        ),
-        (
-            ciborium::Value::Text("validUntil".to_string()),
-            tdate(&validity.valid_until)?,
-        ),
-    ];
-    if let Some(update) = validity.expected_update {
-        validity_entries.push((
-            ciborium::Value::Text("expectedUpdate".into()),
-            tdate(&update)?,
-        ));
+    let validated = crate::cbor::raw::Item::parse(&out)?;
+    if status.is_some() {
+        // Status is the first field in this deterministic schema. Its borrowed
+        // parser shares exactly the same rules as received credentials.
+        let (_, status) = validated
+            .embedded()?
+            .map()?
+            .next()
+            .expect("MSO status field")?;
+        crate::model::issuer_auth::parse_status_ref(status)?;
     }
-    let validity_map = ciborium::Value::Map(validity_entries);
-
-    let mut mso_entries = vec![
-        (
-            ciborium::Value::Text("version".to_string()),
-            ciborium::Value::Text("1.0".to_string()),
-        ),
-        (
-            ciborium::Value::Text("digestAlgorithm".to_string()),
-            ciborium::Value::Text(digest_algorithm.name().to_string()),
-        ),
-        (
-            ciborium::Value::Text("docType".to_string()),
-            ciborium::Value::Text(doc_type.to_string()),
-        ),
-        (
-            ciborium::Value::Text("valueDigests".to_string()),
-            ciborium::Value::Map(vd_entries),
-        ),
-        (
-            ciborium::Value::Text("validityInfo".to_string()),
-            validity_map,
-        ),
-    ];
-
-    mso_entries.push((
-        ciborium::Value::Text("deviceKeyInfo".to_string()),
-        ciborium::Value::Map(vec![(
-            ciborium::Value::Text("deviceKey".to_string()),
-            device_key.to_cbor_value()?,
-        )]),
-    ));
-
-    if let Some(status) = status {
-        mso_entries.push((ciborium::Value::Text("status".to_string()), status));
-    }
-
-    Ok(ciborium::Value::Map(mso_entries))
+    Ok(out)
 }
 
 fn encode_item(
@@ -382,19 +430,30 @@ fn encode_item(
     identifier: &str,
     value: &ciborium::Value,
 ) -> Result<Vec<u8>, MdocError> {
-    let mut inner = Vec::with_capacity(random.len() + identifier.len() + 64);
-    inner.push(0xa4);
-    // RFC 8949 core deterministic order for the four fixed schema keys.
-    push_text(&mut inner, "random");
-    push_bytes(&mut inner, random);
-    push_text(&mut inner, "digestID");
-    push_head(&mut inner, 0, u64::from(digest_id));
-    push_text(&mut inner, "elementValue");
-    data_item::write_canonical(value, &mut inner, 1)?;
-    push_text(&mut inner, "elementIdentifier");
-    push_text(&mut inner, identifier);
-    crate::cbor::raw::validate(&inner)?;
-    Ok(crate::cbor::raw::wrap_tag24_bytes(&inner))
+    let value_len = data_item::encoded_len(value)?;
+    let inner_len = 1
+        + text_len("random")
+        + head_len(random.len() as u64)
+        + random.len()
+        + text_len("digestID")
+        + head_len(u64::from(digest_id))
+        + text_len("elementValue")
+        + value_len
+        + text_len("elementIdentifier")
+        + text_len(identifier);
+    let mut out = tag24_output(inner_len)?;
+    out.push(0xa4);
+    push_text(&mut out, "random");
+    push_bytes(&mut out, random);
+    push_text(&mut out, "digestID");
+    push_head(&mut out, 0, u64::from(digest_id));
+    push_text(&mut out, "elementValue");
+    data_item::write_canonical(value, &mut out, 1)?;
+    push_text(&mut out, "elementIdentifier");
+    push_text(&mut out, identifier);
+    debug_assert_eq!(out.len(), 2 + head_len(inner_len as u64) + inner_len);
+    crate::cbor::raw::validate(&out)?;
+    Ok(out)
 }
 
 fn fresh_item_randomness(
@@ -418,16 +477,118 @@ fn fresh_item_randomness(
     ))
 }
 
-fn tdate(value: &crate::time::Timestamp) -> Result<ciborium::Value, MdocError> {
-    Ok(ciborium::Value::Tag(
-        0,
-        Box::new(ciborium::Value::Text(value.format_rfc3339()?)),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_mso_encoding_matches_independent_canonical_schema() {
+        use ciborium::Value;
+        let key = coset::CoseKeyBuilder::new_ec2_pub_key(
+            iana::EllipticCurve::P_256,
+            vec![1; 32],
+            vec![2; 32],
+        )
+        .build();
+        let mut namespaces = HashMap::new();
+        for namespace in ["org.example.long.namespace", "a"] {
+            let mut items = Vec::new();
+            for id in [65_536, 23, 255] {
+                let random = vec![id as u8; 32];
+                let value = Value::Bytes(vec![id as u8; 256]);
+                let encoded = encode_item(id, &random, "portrait", &value).unwrap();
+                items.push(IssuerSignedItem {
+                    digest_id: id,
+                    random,
+                    element_identifier: "portrait".into(),
+                    element_value: value,
+                    encoded,
+                });
+            }
+            namespaces.insert(namespace.into(), items);
+        }
+        let dates = ValidityInfo {
+            signed: "2026-01-01T00:00:00Z".parse().unwrap(),
+            valid_from: "2026-01-02T00:00:00Z".parse().unwrap(),
+            valid_until: "2027-01-01T00:00:00Z".parse().unwrap(),
+            expected_update: Some("2026-06-01T00:00:00Z".parse().unwrap()),
+        };
+        let date =
+            |time: crate::Timestamp| Value::Tag(0, Box::new(time.format_rfc3339().unwrap().into()));
+        for algorithm in [
+            DigestAlgorithm::Sha256,
+            DigestAlgorithm::Sha384,
+            DigestAlgorithm::Sha512,
+        ] {
+            for with_optional in [false, true] {
+                let mut validity = dates.clone();
+                let status = with_optional
+                    .then(|| Value::Map(vec![("custom".into(), Value::Bytes(vec![0x5a; 65_536]))]));
+                if !with_optional {
+                    validity.expected_update = None;
+                }
+                let actual = encode_mso(
+                    "org.example.document",
+                    &algorithm,
+                    &validity,
+                    &namespaces,
+                    key.clone(),
+                    status.clone(),
+                )
+                .unwrap();
+                let digests = Value::Map(
+                    namespaces
+                        .iter()
+                        .map(|(namespace, items)| {
+                            (
+                                namespace.as_str().into(),
+                                Value::Map(
+                                    items
+                                        .iter()
+                                        .map(|item| {
+                                            (
+                                                item.digest_id.into(),
+                                                Value::Bytes(item.compute_digest(&algorithm)),
+                                            )
+                                        })
+                                        .collect(),
+                                ),
+                            )
+                        })
+                        .collect(),
+                );
+                let mut interval = vec![
+                    ("validUntil".into(), date(validity.valid_until)),
+                    ("signed".into(), date(validity.signed)),
+                    ("validFrom".into(), date(validity.valid_from)),
+                ];
+                if let Some(update) = validity.expected_update {
+                    interval.push(("expectedUpdate".into(), date(update)));
+                }
+                let mut fields = vec![
+                    ("version".into(), "1.0".into()),
+                    ("digestAlgorithm".into(), algorithm.name().into()),
+                    ("docType".into(), "org.example.document".into()),
+                    ("valueDigests".into(), digests),
+                    ("validityInfo".into(), Value::Map(interval)),
+                    (
+                        "deviceKeyInfo".into(),
+                        Value::Map(vec![(
+                            "deviceKey".into(),
+                            key.clone().to_cbor_value().unwrap(),
+                        )]),
+                    ),
+                ];
+                if let Some(status) = status {
+                    fields.push(("status".into(), status));
+                }
+                let inner = data_item::encode_cbor_canonical(&Value::Map(fields)).unwrap();
+                let expected =
+                    data_item::encode_cbor(&Value::Tag(24, Box::new(Value::Bytes(inner)))).unwrap();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
 
     #[test]
     fn borrowed_item_encoding_matches_schema_bytes_and_preserves_tag24() {
@@ -456,8 +617,10 @@ mod tests {
         let value = crate::time::Timestamp::parse_rfc3339("2026-09-01T00:00:00.123+00:00")
             .unwrap()
             .truncate_to_second();
+        let mut out = Vec::new();
+        write_date(&mut out, &value.format_rfc3339().unwrap());
         assert_eq!(
-            tdate(&value).unwrap(),
+            data_item::decode_cbor(&out).unwrap(),
             ciborium::Value::Tag(
                 0,
                 Box::new(ciborium::Value::Text("2026-09-01T00:00:00Z".into()))

@@ -2,7 +2,7 @@
 
 use crate::{
     MdocError,
-    model::{IssuerSignedItem, Mso},
+    model::{IssuerSignedItem, IssuerSignedItemRef, Mso, MsoRef},
 };
 use std::collections::{HashMap, HashSet};
 
@@ -36,16 +36,29 @@ pub fn verify_disclosure(
     Ok(())
 }
 
-/// Used only after parsing wire bytes: parser::parse_issuer_signed checks IDs,
-/// identifiers and salt uniqueness. No caller-mutable model enters this path.
-pub(crate) fn verify_parsed_disclosure(
-    namespaces: &HashMap<String, Vec<IssuerSignedItem>>,
-    mso: &Mso,
+/// Parser-created views already establish unique IDs, identifiers and salts.
+pub(crate) fn verify_borrowed_disclosure(
+    namespaces: &HashMap<&str, Vec<IssuerSignedItemRef<'_>>>,
+    mso: &MsoRef<'_>,
 ) -> Result<(), MdocError> {
     for (namespace, items) in namespaces {
-        let digests = namespace_digests(namespace, mso)?;
+        let digests = mso
+            .value_digests
+            .get(namespace)
+            .ok_or_else(|| MdocError::Disclosure("namespace absent from MSO".into()))?;
         for item in items {
-            verify_item_digest(item, digests, mso)?;
+            let digest = digests
+                .get(&item.digest_id)
+                .ok_or_else(|| MdocError::Disclosure("digestID absent from MSO".into()))?;
+            if !crate::model::issuer_signed_item::digest_matches(
+                item.encoded,
+                digest,
+                &mso.digest_algorithm,
+            ) {
+                return Err(MdocError::Disclosure(
+                    "IssuerSignedItemBytes digest mismatch".into(),
+                ));
+            }
         }
     }
     Ok(())

@@ -21,8 +21,9 @@ fn annex_d_original_bytes_digests_and_issuer_signature() {
     );
     disclosure::verify_disclosure(&document.issuer_signed.name_spaces, &mso).unwrap();
     let certificate = x509_cert::Certificate::from_der(auth.certificate_der().unwrap()).unwrap();
-    let key = cose::key::cose_key_from_spki(&certificate.tbs_certificate.subject_public_key_info)
-        .unwrap();
+    let key =
+        cose::key::cose_key_from_spki(certificate.tbs_certificate().subject_public_key_info())
+            .unwrap();
     assert!(
         cose::verify_cose_signature(
             &auth.cose_sign1.tbs_data(&[]),

@@ -482,7 +482,7 @@ fn direct_sign1_verification_rejects_signed_bignum_header_types() {
 
 #[test]
 fn direct_mac0_verification_rejects_authenticated_bignum_header_types() {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
 
     // Independent Python standard-library tags:
