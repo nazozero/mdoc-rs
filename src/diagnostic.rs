@@ -1,11 +1,6 @@
-//! CBOR diagnostic-notation pretty printer (feature: `debug`).
+//! CBOR diagnostic notation (RFC 8949 §8; feature: `debug`).
 //!
-//! Renders a [`ciborium::Value`] in the Extended Diagnostic Notation of
-//! RFC 8949 §8 (and RFC 8610 Appendix G), which is invaluable when debugging
-//! mdoc interop failures — you can eyeball the exact structure, tags, and byte
-//! strings of a `DeviceResponse` / MSO without a hex editor.
-//!
-//! This is a triage aid, not a canonical serializer.
+//! Displays decoded values, map order, tags and byte strings for inspection.
 
 use ciborium::Value;
 
@@ -43,15 +38,32 @@ fn render(value: &Value, out: &mut String) {
             out.push('\'');
         }
         Value::Float(f) => {
-            let _ = write!(out, "{f}");
+            if f.is_finite() {
+                let _ = write!(out, "{f:?}");
+            } else if f.is_nan() {
+                out.push_str("NaN");
+            } else {
+                out.push_str(if f.is_sign_negative() {
+                    "-Infinity"
+                } else {
+                    "Infinity"
+                });
+            }
         }
         Value::Text(s) => {
-            // Escape the few characters that would break the rendering.
             out.push('"');
             for c in s.chars() {
                 match c {
                     '"' => out.push_str("\\\""),
                     '\\' => out.push_str("\\\\"),
+                    '\u{8}' => out.push_str("\\b"),
+                    '\t' => out.push_str("\\t"),
+                    '\n' => out.push_str("\\n"),
+                    '\u{c}' => out.push_str("\\f"),
+                    '\r' => out.push_str("\\r"),
+                    '\u{0}'..='\u{1f}' => {
+                        let _ = write!(out, "\\u{:04x}", u32::from(c));
+                    }
                     _ => out.push(c),
                 }
             }
@@ -86,7 +98,7 @@ fn render(value: &Value, out: &mut String) {
             }
             out.push('}');
         }
-        // ciborium::Value is non-exhaustive; render anything new defensively.
+        // ciborium::Value is non-exhaustive.
         other => {
             let _ = write!(out, "{other:?}");
         }
@@ -103,6 +115,46 @@ mod tests {
         assert_eq!(to_diagnostic(&Value::Bool(true)), "true");
         assert_eq!(to_diagnostic(&Value::Null), "null");
         assert_eq!(to_diagnostic(&Value::Text("hi".into())), "\"hi\"");
+    }
+
+    #[test]
+    fn text_uses_json_escapes_and_preserves_printable_unicode() {
+        let controls: String = (0u8..=31).map(char::from).collect();
+        assert_eq!(
+            to_diagnostic(&Value::Text(controls)),
+            concat!(
+                "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007",
+                "\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f",
+                "\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017",
+                "\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\"",
+            )
+        );
+        assert_eq!(
+            to_diagnostic(&Value::Text("水 / \"quoted\" \\".into())),
+            r#""水 / \"quoted\" \\""#,
+        );
+    }
+
+    #[test]
+    fn floats_keep_their_type_sign_and_standard_nonfinite_names() {
+        for (value, expected) in [
+            (0.0, "0.0"),
+            (-0.0, "-0.0"),
+            (1.0, "1.0"),
+            (-4.0, "-4.0"),
+            (1.5, "1.5"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+            (f64::NAN, "NaN"),
+            (-f64::NAN, "NaN"),
+        ] {
+            assert_eq!(to_diagnostic(&Value::Float(value)), expected);
+        }
+        for value in [f64::from_bits(1), f64::MIN_POSITIVE, 1e20, f64::MAX] {
+            let rendered = to_diagnostic(&Value::Float(value));
+            assert!(rendered.contains('.') || rendered.contains('e'));
+            assert_eq!(rendered.parse::<f64>().unwrap().to_bits(), value.to_bits());
+        }
     }
 
     #[test]
