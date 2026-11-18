@@ -123,6 +123,12 @@ leap seconds distinctly. Fractional leap seconds are rejected. Comparison orders
 `59.999999999 < 60 < next second`; Unix conversion returns `None` for `60`.
 Formatting preserves the leap label. Signed MSO bytes remain unchanged.
 
+[CGPM Resolution 5 (2026)](https://www.bipm.org/en/cgpm-2026/resolution-5)
+sets continuous UTC from 20 May 2027. Historical
+[RFC 3339 leap-second timestamps](https://www.rfc-editor.org/rfc/rfc3339.html#section-5.7)
+remain part of the accepted wire format and retain their exact ordering during
+validity and certificate-boundary checks.
+
 The core migrated from Chrono after
 [RUSTSEC-2026-0543](https://github.com/rustsec/advisory-db/blob/main/crates/chrono/RUSTSEC-2026-0543.md),
 an unmaintained-package advisory. Historical benchmark baselines retain their
