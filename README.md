@@ -129,7 +129,8 @@ Tests include ISO Annex D, official Final handover examples, independent
 signature/MAC vectors, malformed-input tests and property tests. The
 [core benchmark](benchmarks/core/README.md) records CPU, elapsed time, allocation
 stacks and linked consumer sizes. See the
-[performance report](docs/performance-2026-11-18.md) for results and raw evidence.
+[merge review](docs/review-2026-11-18.md) and
+[performance report](docs/performance-2026-11-18-final.md) for results and raw evidence.
 Historical measurements are in the
 [2026-11-17 validation record](docs/validation-2026-11-17.md).
 

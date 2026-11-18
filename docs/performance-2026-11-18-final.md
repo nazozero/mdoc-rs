@@ -1,5 +1,8 @@
 # Core performance — final review, 2026-11-18
 
+The [merge review](review-2026-11-18.md) records the final encoding simplification,
+targeted verification recheck and latest validation.
+
 This records the final implementation for [Issue #4](https://github.com/nazozero/nazo-mdoc/issues/4).
 The [first measurement](performance-2026-11-18.md) retains the earlier implementation and profiles.
 
