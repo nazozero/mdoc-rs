@@ -71,10 +71,9 @@ fn push_issuer_signed(out: &mut Vec<u8>, issuer_signed: &IssuerSigned) -> Result
             push_text(out, name);
             push_head(out, 4, items.len() as u64);
             for item in items {
-                // The public model can be assembled or edited by a caller.
-                // Check each raw item once at this encoding boundary; never
-                // replace it with a serialization of the decoded attributes.
-                raw::tag24_inner(&item.encoded)?;
+                // Public models may be edited. Check the framing here and
+                // validate embedded contents once in the completed envelope.
+                raw::validate_tag24_framing(&item.encoded)?;
                 out.extend_from_slice(&item.encoded);
             }
         }
@@ -121,7 +120,7 @@ fn push_document(out: &mut Vec<u8>, doc: &IssuerSignedDocument) -> Result<(), Md
             }
         }
         push_text(out, "nameSpaces");
-        raw::tag24_inner(&device.name_spaces_bytes)?;
+        raw::validate_tag24_framing(&device.name_spaces_bytes)?;
         out.extend_from_slice(&device.name_spaces_bytes);
     }
     push_text(out, "issuerSigned");

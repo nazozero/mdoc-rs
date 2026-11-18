@@ -183,6 +183,28 @@ pub fn tag24_inner(bytes: &[u8]) -> Result<&[u8], MdocError> {
     Item::parse(bytes)?.tag24()
 }
 
+/// Check the exact Tag 24 byte-string framing before appending raw bytes.
+/// The encoder validates the contents and budgets in the completed envelope.
+#[cfg(feature = "issue")]
+pub(crate) fn validate_tag24_framing(bytes: &[u8]) -> Result<(), MdocError> {
+    if bytes.len() > Limits::default().max_bytes {
+        return Err(error("CBOR byte limit exceeded"));
+    }
+    let (major, tag, head) = header(bytes)?;
+    if major != 6 || tag != 24 {
+        return Err(error("expected Tag 24"));
+    }
+    let child = &bytes[head..];
+    let (major, length, head) = header(child)?;
+    if major != 2 {
+        return Err(error("Tag 24 must contain a byte string"));
+    }
+    if end_of_string(child, length, head)? != child.len() {
+        return Err(error("trailing CBOR data"));
+    }
+    Ok(())
+}
+
 /// An immutable slice known to contain exactly one validated item.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Item<'a> {

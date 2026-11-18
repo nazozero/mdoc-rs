@@ -289,6 +289,110 @@ fn encoder_cannot_silently_attach_a_device_signature_payload() {
 }
 
 #[test]
+fn encoder_checks_raw_tag24_framing_and_embedded_contents_after_model_mutation() {
+    let original =
+        nazo_mdoc::parse_hex(include_str!("vectors/iso_18013_5_annex_d_mdl.hex")).unwrap();
+    for wire in [
+        "a0",                   // Untagged map.
+        "41a0",                 // Untagged byte string.
+        "d81741a0",             // Wrong tag.
+        "d818a0",               // Tag 24 without a byte string.
+        "d818d81841a0",         // Nested tag instead of a byte string.
+        "d81841a000",           // A second item after the byte string.
+        "d81841",               // Truncated byte string.
+        "d81842a0",             // Declared length exceeds the remaining bytes.
+        "d9001841a0",           // Nonshortest tag.
+        "d8185801a0",           // Nonshortest byte-string length.
+        "d81840",               // Empty embedded CBOR.
+        "d81841ff",             // Invalid embedded CBOR.
+        "d81847a2616101616102", // Duplicate keys inside the embedded map.
+        "d81842a000",           // A second item inside the byte string.
+    ] {
+        let mut response = original.clone();
+        let document = &mut response.documents[0];
+        document.issuer_signed.name_spaces.get_mut(NS).unwrap()[0].encoded =
+            hex::decode(wire).unwrap();
+        assert!(document.to_issuer_signed_cbor().is_err(), "issuer: {wire}");
+        assert!(
+            document.to_device_response_cbor().is_err(),
+            "document: {wire}"
+        );
+        assert!(response.to_cbor().is_err(), "response: {wire}");
+
+        let mut response = original.clone();
+        let document = &mut response.documents[0];
+        document.device_signed.as_mut().unwrap().name_spaces_bytes = hex::decode(wire).unwrap();
+        assert!(
+            document.to_device_response_cbor().is_err(),
+            "device: {wire}"
+        );
+        assert!(response.to_cbor().is_err(), "response device: {wire}");
+    }
+}
+
+#[test]
+fn encoder_applies_budgets_to_the_complete_envelope() {
+    use nazo_mdoc::cbor::raw::{Limits, tag24_inner, validate};
+
+    let original =
+        nazo_mdoc::parse_hex(include_str!("vectors/iso_18013_5_annex_d_mdl.hex")).unwrap();
+    let template = &original.documents[0].issuer_signed.name_spaces[NS][0];
+    let inner: Value = ciborium::from_reader(tag24_inner(&template.encoded).unwrap()).unwrap();
+    let limits = Limits::default();
+    let mut nested = Value::Null;
+    for _ in 0..limits.max_depth - 4 {
+        nested = Value::Array(vec![nested]);
+    }
+    for (element, expected) in [
+        (
+            Value::Bytes(vec![0; limits.max_bytes / 2]),
+            "CBOR byte limit exceeded",
+        ),
+        (
+            Value::Array(vec![
+                Value::Array(vec![
+                    Value::Null;
+                    limits.max_collection_items
+                ]);
+                9
+            ]),
+            "CBOR item limit exceeded",
+        ),
+        (nested, "CBOR nesting limit exceeded"),
+    ] {
+        let mut value = inner.clone();
+        value
+            .as_map_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|(key, _)| key.as_text() == Some("elementValue"))
+            .unwrap()
+            .1 = element;
+        let mut item = template.clone();
+        item.encoded = tagged(&value);
+        validate(&item.encoded).expect("each individual item fits the default budgets");
+
+        let mut response = original.clone();
+        let document = &mut response.documents[0];
+        document.issuer_signed.name_spaces.clear();
+        document
+            .issuer_signed
+            .name_spaces
+            .insert(NS.into(), vec![item.clone(), item]);
+        for result in [
+            document.to_issuer_signed_cbor(),
+            document.to_device_response_cbor(),
+            response.to_cbor(),
+        ] {
+            assert!(
+                matches!(&result, Err(nazo_mdoc::MdocError::Cbor(reason)) if reason == expected),
+                "expected {expected}, got {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn official_annex_d_signed_items_and_payloads_survive_encoding_exactly() {
     let original =
         nazo_mdoc::parse_hex(include_str!("vectors/iso_18013_5_annex_d_mdl.hex")).unwrap();

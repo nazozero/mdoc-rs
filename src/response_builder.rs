@@ -132,15 +132,16 @@ fn decode_namespaces(
     encoded: &[u8],
 ) -> Result<HashMap<String, HashMap<String, ciborium::Value>>, MdocError> {
     let namespaces = raw::Item::parse(encoded)?.embedded()?.map()?;
-    let mut decoded = HashMap::new();
+    let mut decoded = HashMap::with_capacity(namespaces.len());
     for namespace in namespaces {
         let (name, elements) = namespace?;
         let name = name.text()?;
         if name.is_empty() {
             return Err(MdocError::Issuance("empty device namespace".into()));
         }
-        let mut values = HashMap::new();
-        for element in elements.map()? {
+        let elements = elements.map()?;
+        let mut values = HashMap::with_capacity(elements.len());
+        for element in elements {
             let (name, value) = element?;
             let name = name.text()?;
             if name.is_empty() {
