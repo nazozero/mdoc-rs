@@ -2,21 +2,15 @@
 //!
 //! The unsigned map framing is deterministic. Signed `IssuerSignedItemBytes`,
 //! `DeviceNameSpacesBytes`, protected COSE headers and COSE payloads retain their
-//! original bytes. Encoding a document does not authenticate it or establish
-//! issuer trust, certificate status, or credential status.
+//! original bytes. Use the verifier APIs to authenticate encoded documents.
 
 use coset::CborSerializable;
 
-use crate::cbor::raw::{self, push_head, push_text};
+use crate::cbor::raw::{self, push_bytes, push_head, push_text};
 use crate::error::MdocError;
 use crate::model::device_response::{DeviceResponse, DeviceResponseStatus};
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
 use crate::model::types::DeviceAuth;
-
-fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-    push_head(out, 2, bytes.len() as u64);
-    out.extend_from_slice(bytes);
-}
 
 // COSE_Sign1 and COSE_Mac0 share the four-element wire structure. Serialize the
 // byte-string fields by borrowing them rather than cloning an entire COSE object
@@ -180,7 +174,7 @@ impl IssuerSignedDocument {
     }
 
     /// Encode one document as a version 1.0, successful DeviceResponse.
-    /// This does not infer that the document is authenticated or trusted.
+    /// Authentication and trust evaluation use the verifier APIs.
     pub fn to_device_response_cbor(&self) -> Result<Vec<u8>, MdocError> {
         let mut out = Vec::new();
         out.push(0xa3);

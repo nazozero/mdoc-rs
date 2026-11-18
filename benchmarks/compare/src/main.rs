@@ -1,4 +1,4 @@
-//! One-process comparison against the exact NazoAuth production library commit.
+//! One-process comparison against the historical 0.2.0 library revision.
 //! See ../README.md before interpreting the measurements.
 
 extern crate candidate as nazo_mdoc;

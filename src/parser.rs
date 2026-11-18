@@ -1,7 +1,6 @@
 //! Strict DeviceResponse decoding. Authentication is a separate operation.
 //!
-//! Signed byte strings are copied once from their original wire slices; neither
-//! map order nor Tag 24 envelopes are reconstructed before digest verification.
+//! Signed byte strings retain their original map order and Tag 24 envelopes.
 
 use crate::{
     MdocError,
@@ -17,7 +16,7 @@ fn missing<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
     value.ok_or_else(|| error(&format!("missing {field}")))
 }
 
-/// Decode a bounded DeviceResponse; this does not authenticate its contents.
+/// Decode a bounded DeviceResponse. Use the verifier to authenticate its contents.
 pub fn parse(bytes: &[u8]) -> Result<DeviceResponse, MdocError> {
     parse_with_limits(bytes, Limits::default(), 16)
 }

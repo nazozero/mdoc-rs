@@ -1,14 +1,12 @@
 //! Session transcripts and device authentication inputs.
 //!
-//! OpenID4VP constructors implement the **1.0 Final** handovers in B.2.6.
-//! Generic transcripts can be checked without assigning a transport profile.
-//! Structural validation is not proof that a transcript belongs to the current
-//! request: callers using [`SessionTranscript::from_cbor`] must establish that
-//! association themselves. The profile-specific validators check the binding to
-//! the supplied request context, whose provenance remains the caller's duty.
+//! OpenID4VP constructors implement the 1.0 Final handovers in B.2.6.
+//! Profile-specific validators bind bytes to the supplied request context.
+//! [`SessionTranscript::from_cbor`] checks structure; its caller establishes
+//! request binding. Applications authenticate their request context.
 //!
-//! Received transcripts and `DeviceNameSpacesBytes` are embedded verbatim. They
-//! are never decoded and re-encoded to construct a signature or MAC input.
+//! Signature and MAC inputs embed received transcripts and
+//! `DeviceNameSpacesBytes` verbatim.
 
 use std::borrow::Cow;
 
@@ -24,8 +22,8 @@ const TAG24: &[u8] = &[0xd8, 0x18];
 
 /// The validation performed when constructing a [`SessionTranscript`].
 ///
-/// None of these states establishes issuer trust, holder authentication, replay
-/// protection, or the authenticity of the request context supplied by a caller.
+/// The verifier establishes holder authentication. The application establishes
+/// request authenticity, freshness and issuer trust.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionBinding {
     /// Only CBOR syntax and the three-element transcript array were checked.
@@ -38,8 +36,7 @@ pub enum SessionBinding {
 
 /// Exact, validated CBOR bytes of a session transcript.
 ///
-/// Private fields prevent bypassing the structural check through an unchecked
-/// `Raw` variant. Borrowed construction retains the original backing storage.
+/// Constructors validate structure. Borrowed construction retains the input storage.
 #[derive(Clone, Debug)]
 pub struct SessionTranscript<'a> {
     bytes: Cow<'a, [u8]>,
@@ -55,8 +52,8 @@ pub struct SessionTranscript<'a> {
 /// `response_uri` or `redirect_uri`, as selected by the response mode.
 ///
 /// Values must come from the authenticated Request Object for a signed request,
-/// or from the Authorization Request parameters for an unsigned request. This
-/// core does not validate the Request Object or choose an encryption key.
+/// or from the Authorization Request parameters for an unsigned request.
+/// The application validates the Request Object and selects the encryption key.
 #[derive(Clone, Copy, Debug)]
 pub struct RedirectHandover<'a> {
     pub client_id: &'a str,
@@ -79,7 +76,7 @@ pub struct DcApiHandover<'a> {
 
 impl<'a> SessionTranscript<'a> {
     /// Check one complete, definite-length CBOR three-element array and borrow
-    /// its original bytes. No request-context or transport binding is inferred.
+    /// its original bytes. The caller establishes request and transport binding.
     pub fn from_cbor(bytes: &'a [u8]) -> Result<Self, MdocError> {
         validate_transcript_structure(bytes)?;
         Ok(Self {
@@ -164,7 +161,7 @@ impl<'a> SessionTranscript<'a> {
 
 impl SessionTranscript<'static> {
     /// Check and take ownership of generic transcript bytes without copying.
-    /// As with [`Self::from_cbor`], this does not establish request binding.
+    /// The caller establishes request binding, as with [`Self::from_cbor`].
     pub fn from_owned_cbor(bytes: Vec<u8>) -> Result<Self, MdocError> {
         validate_transcript_structure(&bytes)?;
         Ok(Self {
@@ -266,12 +263,9 @@ fn hash_thumbprint(digest: &mut Sha256, value: Option<&[u8; 32]>) {
 /// `DeviceAuthentication` is the ISO/IEC 18013-5 §9.1.3.4 four-element array.
 /// Both the transcript and namespaces are embedded byte-for-byte.
 ///
-/// **Breaking change:** `device_name_spaces_bytes` must contain the complete
-/// received `DeviceNameSpacesBytes` Tag24 and byte string, including the inner
-/// CBOR map. Earlier versions accepted only the inner map and omitted the outer
-/// Tag24 from the authentication payload. Those legacy encodings are no longer
-/// produced. Call [`build_device_authentication`] with an already checked
-/// transcript to avoid repeating its structural validation.
+/// `device_name_spaces_bytes` must contain the complete received
+/// `DeviceNameSpacesBytes` Tag 24, byte string and inner CBOR map.
+/// [`build_device_authentication`] accepts an already validated transcript.
 pub fn build_device_authentication_bytes(
     session_transcript_bytes: &[u8],
     doc_type: &str,
@@ -283,8 +277,8 @@ pub fn build_device_authentication_bytes(
 
 /// Build a detached payload using an already validated transcript.
 ///
-/// `device_name_spaces_bytes` is a complete Tag24-encoded `DeviceNameSpaces`
-/// map, not merely the inner map. Its encoding is checked and retained exactly.
+/// `device_name_spaces_bytes` is a complete Tag 24 envelope containing
+/// `DeviceNameSpaces`. Its encoding is checked and retained exactly.
 pub fn build_device_authentication(
     transcript: &SessionTranscript<'_>,
     doc_type: &str,
@@ -338,7 +332,7 @@ pub(crate) fn build_device_authentication_validated(
 ///
 /// ISO/IEC 18013-5 §9.1.3.5 specifies HKDF-SHA256 with `info = "EMacKey"` and
 /// `salt = SHA-256(SessionTranscriptBytes)`. `SessionTranscriptBytes` includes
-/// the Tag24 and byte-string wrapper; hashing the bare transcript is incorrect.
+/// the Tag 24 and byte-string wrapper.
 /// The input here is the bare transcript, which this function validates before
 /// hashing it with that wrapper. ECDH key agreement remains the caller's job.
 pub fn derive_ephemeral_mac_key(

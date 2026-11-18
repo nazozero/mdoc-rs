@@ -19,21 +19,25 @@ pub(crate) fn validate_device_public_key(key: &coset::CoseKey) -> Result<(), Mdo
         _ => return Err(MdocError::Cose("unsupported device public key".into())),
     };
     crate::cose::validate_verification_key(key, alg)?;
-    let bytes = key.public_key_bytes()?;
     let invalid = || MdocError::Cose("invalid device public point".into());
     match alg {
         -7 => {
-            p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).map_err(|_| invalid())?;
+            p256::ecdsa::VerifyingKey::from_sec1_bytes(&ec2_point::<65>(key)?)
+                .map_err(|_| invalid())?;
         }
         -35 => {
-            p384::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).map_err(|_| invalid())?;
+            p384::ecdsa::VerifyingKey::from_sec1_bytes(&ec2_point::<97>(key)?)
+                .map_err(|_| invalid())?;
         }
         -36 => {
-            p521::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).map_err(|_| invalid())?;
+            p521::ecdsa::VerifyingKey::from_sec1_bytes(&ec2_point::<133>(key)?)
+                .map_err(|_| invalid())?;
         }
         -8 => {
             let public = ed25519_dalek::VerifyingKey::from_bytes(
-                bytes.as_slice().try_into().map_err(|_| invalid())?,
+                get_param(&key.params, -2)?
+                    .try_into()
+                    .map_err(|_| invalid())?,
             )
             .map_err(|_| invalid())?;
             if public.is_weak() {
@@ -43,6 +47,17 @@ pub(crate) fn validate_device_public_key(key: &coset::CoseKey) -> Result<(), Mdo
         _ => unreachable!("validated supported algorithm"),
     }
     Ok(())
+}
+
+/// The caller has checked the algorithm, curve and coordinate widths with
+/// validate_verification_key. N is the uncompressed SEC1 width for that curve.
+pub(super) fn ec2_point<const N: usize>(key: &coset::CoseKey) -> Result<[u8; N], MdocError> {
+    let width = (N - 1) / 2;
+    let mut point = [0; N];
+    point[0] = 4;
+    point[1..1 + width].copy_from_slice(get_param(&key.params, -2)?);
+    point[1 + width..].copy_from_slice(get_param(&key.params, -3)?);
+    Ok(point)
 }
 
 /// Extension trait for `coset::CoseKey` with mdoc-specific operations.
@@ -122,7 +137,10 @@ impl CoseKeyExt for coset::CoseKey {
 }
 
 /// Extract a byte-string parameter from COSE key params by label.
-fn get_param(params: &[(coset::Label, ciborium::Value)], label: i64) -> Result<&[u8], MdocError> {
+pub(super) fn get_param(
+    params: &[(coset::Label, ciborium::Value)],
+    label: i64,
+) -> Result<&[u8], MdocError> {
     for (l, v) in params {
         if let coset::Label::Int(n) = l
             && *n == label
@@ -154,8 +172,7 @@ pub fn cose_alg_to_name(alg: i64) -> &'static str {
 /// (`0x04 || x || y`).
 ///
 /// `curve_id` is a COSE curve identifier (see [`curves`]): P-256 (1), P-384 (2),
-/// or P-521 (3). Smooths device-key input during issuance, where callers
-/// otherwise have to hand-assemble a `CoseKeyBuilder` (improvement #9).
+/// or P-521 (3).
 pub fn cose_key_from_sec1_bytes(curve_id: i64, point: &[u8]) -> Result<coset::CoseKey, MdocError> {
     let (curve, coord_len) = match curve_id {
         curves::P256 => (iana::EllipticCurve::P_256, 32usize),
@@ -181,9 +198,8 @@ pub fn cose_key_from_sec1_bytes(curve_id: i64, point: &[u8]) -> Result<coset::Co
     Ok(coset::CoseKeyBuilder::new_ec2_pub_key(curve, x, y).build())
 }
 
-/// Build an EC2 `coset::CoseKey` from a PEM-encoded `SubjectPublicKeyInfo`
-/// (the `-----BEGIN PUBLIC KEY-----` form), mapping the named curve
-/// (P-256/384/521) to the COSE `crv` (improvement #9).
+/// Convert a PEM `SubjectPublicKeyInfo` (`BEGIN PUBLIC KEY`) for P-256, P-384,
+/// P-521 or Ed25519 into a COSE public key.
 pub fn cose_key_from_pem(pem: &str) -> Result<coset::CoseKey, MdocError> {
     use der::DecodePem;
     use x509_cert::spki::SubjectPublicKeyInfoOwned;
@@ -194,13 +210,13 @@ pub fn cose_key_from_pem(pem: &str) -> Result<coset::CoseKey, MdocError> {
     cose_key_from_spki(&spki)
 }
 
-/// Convert an X.509 public key using its authenticated algorithm and curve OIDs.
-/// This does not establish certificate trust.
+/// Convert an X.509 public key according to its algorithm and curve OIDs.
+/// The application validates the certificate.
 pub fn cose_key_from_spki(
     spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
 ) -> Result<coset::CoseKey, MdocError> {
     use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
-    if spki.algorithm.oid.to_string() == "1.3.101.112" {
+    if spki.algorithm.oid == const_oid::ObjectIdentifier::new_unwrap("1.3.101.112") {
         if spki.algorithm.parameters.is_some() {
             return Err(MdocError::Cose(
                 "Ed25519 SPKI parameters must be absent".into(),

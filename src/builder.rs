@@ -5,6 +5,7 @@ use der::Decode;
 use std::collections::{HashMap, HashSet};
 
 use crate::cbor::data_item;
+use crate::cbor::raw::{push_bytes, push_head, push_text};
 use crate::error::MdocError;
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
 use crate::model::issuer_auth::IssuerAuth;
@@ -71,14 +72,14 @@ impl DocumentBuilder {
         namespace: &str,
         attributes: Vec<(&str, ciborium::Value)>,
     ) -> Self {
-        let entries: Vec<(String, ciborium::Value)> = attributes
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
         self.name_spaces
             .entry(namespace.to_string())
             .or_default()
-            .extend(entries);
+            .extend(
+                attributes
+                    .into_iter()
+                    .map(|(key, value)| (key.to_owned(), value)),
+            );
         self
     }
 
@@ -161,8 +162,8 @@ impl DocumentBuilder {
             .map(crate::time::Timestamp::truncate_to_second);
         validity.validate()?;
 
-        let mut name_spaces: HashMap<String, Vec<IssuerSignedItem>> = HashMap::new();
-        let mut value_digests: HashMap<String, HashMap<u32, Vec<u8>>> = HashMap::new();
+        let mut name_spaces = HashMap::with_capacity(self.name_spaces.len());
+        let mut value_digests = HashMap::with_capacity(self.name_spaces.len());
         if self.doc_type.is_empty() || self.name_spaces.is_empty() {
             return Err(MdocError::Issuance(
                 "docType and at least one namespace are required".into(),
@@ -170,9 +171,8 @@ impl DocumentBuilder {
         }
         let device_key = self
             .device_key
-            .as_ref()
             .ok_or_else(|| MdocError::Issuance("device public key is required".into()))?;
-        crate::cose::key::validate_device_public_key(device_key)?;
+        crate::cose::key::validate_device_public_key(&device_key)?;
         if certificate_chain.is_empty() || certificate_chain.iter().any(Vec::is_empty) {
             return Err(MdocError::Issuance("nonempty x5chain is required".into()));
         }
@@ -190,50 +190,29 @@ impl DocumentBuilder {
         let mut used_digest_ids = HashSet::new();
         let mut used_randoms = HashSet::new();
 
-        for (namespace, attributes) in &self.name_spaces {
+        for (namespace, attributes) in self.name_spaces {
             if namespace.is_empty() || attributes.is_empty() {
                 return Err(MdocError::Issuance("empty namespace".into()));
             }
-            let mut identifiers = HashSet::new();
-            let mut items = Vec::with_capacity(attributes.len());
-            let mut ns_digests = HashMap::new();
-
-            for (elem_id, elem_value) in attributes {
+            let mut identifiers = HashSet::with_capacity(attributes.len());
+            for (elem_id, _) in &attributes {
                 if elem_id.is_empty() || !identifiers.insert(elem_id) {
                     return Err(MdocError::Issuance(
                         "empty or duplicate elementIdentifier".into(),
                     ));
                 }
+            }
+            let mut items = Vec::with_capacity(attributes.len());
+            let mut ns_digests = HashMap::with_capacity(attributes.len());
+            for (elem_id, elem_value) in attributes {
                 let (digest_id, random) =
                     fresh_item_randomness(&mut used_digest_ids, &mut used_randoms)?;
-
-                let item_map = ciborium::Value::Map(vec![
-                    (
-                        ciborium::Value::Text("digestID".to_string()),
-                        ciborium::Value::Integer(ciborium::value::Integer::from(digest_id)),
-                    ),
-                    (
-                        ciborium::Value::Text("random".to_string()),
-                        ciborium::Value::Bytes(random.clone()),
-                    ),
-                    (
-                        ciborium::Value::Text("elementIdentifier".to_string()),
-                        ciborium::Value::Text(elem_id.clone()),
-                    ),
-                    (
-                        ciborium::Value::Text("elementValue".to_string()),
-                        elem_value.clone(),
-                    ),
-                ]);
-
-                let inner = data_item::encode_cbor_canonical(&item_map)?;
-                let encoded = crate::cbor::raw::wrap_tag24_bytes(&inner);
-
+                let encoded = encode_item(digest_id, &random, &elem_id, &elem_value)?;
                 let item = IssuerSignedItem {
                     digest_id,
                     random,
-                    element_identifier: elem_id.clone(),
-                    element_value: elem_value.clone(),
+                    element_identifier: elem_id,
+                    element_value: elem_value,
                     encoded,
                 };
 
@@ -244,16 +223,16 @@ impl DocumentBuilder {
             }
 
             name_spaces.insert(namespace.clone(), items);
-            value_digests.insert(namespace.clone(), ns_digests);
+            value_digests.insert(namespace, ns_digests);
         }
 
         let mso_map = build_mso_cbor(
             &self.doc_type,
             &self.digest_algorithm,
             &validity,
-            &value_digests,
-            Some(device_key),
-            self.status.as_ref(),
+            value_digests,
+            device_key,
+            self.status,
         )?;
 
         let mso_inner = data_item::encode_cbor_canonical(&mso_map)?;
@@ -290,7 +269,10 @@ impl DocumentBuilder {
             .unprotected(unprotected)
             .payload(mso_bytes)
             .build();
-        let signing_input = cose_sign1.tbs_data(&[]);
+        let signing_input = crate::cose::sign1_structure(
+            &cose_sign1.protected,
+            cose_sign1.payload.as_deref().expect("prepared MSO payload"),
+        )?;
         Ok(PreparedDocument {
             document: IssuerSignedDocument {
                 doc_type: self.doc_type,
@@ -312,21 +294,21 @@ fn build_mso_cbor(
     doc_type: &str,
     digest_algorithm: &DigestAlgorithm,
     validity: &ValidityInfo,
-    value_digests: &HashMap<String, HashMap<u32, Vec<u8>>>,
-    device_key: Option<&coset::CoseKey>,
-    status: Option<&ciborium::Value>,
+    value_digests: HashMap<String, HashMap<u32, Vec<u8>>>,
+    device_key: coset::CoseKey,
+    status: Option<ciborium::Value>,
 ) -> Result<ciborium::Value, MdocError> {
-    let mut vd_entries = Vec::new();
+    let mut vd_entries = Vec::with_capacity(value_digests.len());
     for (ns, digests) in value_digests {
-        let mut digest_entries = Vec::new();
+        let mut digest_entries = Vec::with_capacity(digests.len());
         for (id, digest) in digests {
             digest_entries.push((
-                ciborium::Value::Integer(ciborium::value::Integer::from(*id)),
-                ciborium::Value::Bytes(digest.clone()),
+                ciborium::Value::Integer(ciborium::value::Integer::from(id)),
+                ciborium::Value::Bytes(digest),
             ));
         }
         vd_entries.push((
-            ciborium::Value::Text(ns.clone()),
+            ciborium::Value::Text(ns),
             ciborium::Value::Map(digest_entries),
         ));
     }
@@ -376,41 +358,56 @@ fn build_mso_cbor(
         ),
     ];
 
-    if let Some(key) = device_key {
-        let key_value = key.clone().to_cbor_value()?;
-
-        let device_key_info = ciborium::Value::Map(vec![(
+    mso_entries.push((
+        ciborium::Value::Text("deviceKeyInfo".to_string()),
+        ciborium::Value::Map(vec![(
             ciborium::Value::Text("deviceKey".to_string()),
-            key_value,
-        )]);
-
-        mso_entries.push((
-            ciborium::Value::Text("deviceKeyInfo".to_string()),
-            device_key_info,
-        ));
-    }
+            device_key.to_cbor_value()?,
+        )]),
+    ));
 
     if let Some(status) = status {
-        mso_entries.push((ciborium::Value::Text("status".to_string()), status.clone()));
+        mso_entries.push((ciborium::Value::Text("status".to_string()), status));
     }
 
     Ok(ciborium::Value::Map(mso_entries))
 }
 
+fn encode_item(
+    digest_id: u32,
+    random: &[u8],
+    identifier: &str,
+    value: &ciborium::Value,
+) -> Result<Vec<u8>, MdocError> {
+    let mut inner = Vec::with_capacity(random.len() + identifier.len() + 64);
+    inner.push(0xa4);
+    // RFC 8949 core deterministic order for the four fixed schema keys.
+    push_text(&mut inner, "random");
+    push_bytes(&mut inner, random);
+    push_text(&mut inner, "digestID");
+    push_head(&mut inner, 0, u64::from(digest_id));
+    push_text(&mut inner, "elementValue");
+    data_item::write_canonical(value, &mut inner, 1)?;
+    push_text(&mut inner, "elementIdentifier");
+    push_text(&mut inner, identifier);
+    crate::cbor::raw::validate(&inner)?;
+    Ok(crate::cbor::raw::wrap_tag24_bytes(&inner))
+}
+
 fn fresh_item_randomness(
     ids: &mut HashSet<u32>,
-    salts: &mut HashSet<Vec<u8>>,
+    salts: &mut HashSet<[u8; 32]>,
 ) -> Result<(u32, Vec<u8>), MdocError> {
     for _ in 0..32 {
         let mut entropy = [0u8; 36];
         getrandom::fill(&mut entropy)
             .map_err(|e| MdocError::Issuance(format!("OS entropy: {e}")))?;
         let id = u32::from_be_bytes(entropy[..4].try_into().expect("four bytes")) & 0x7fff_ffff;
-        let salt = entropy[4..].to_vec();
+        let salt: [u8; 32] = entropy[4..].try_into().expect("32-byte salt");
         if !ids.contains(&id) && !salts.contains(&salt) {
             ids.insert(id);
-            salts.insert(salt.clone());
-            return Ok((id, salt));
+            salts.insert(salt);
+            return Ok((id, salt.to_vec()));
         }
     }
     Err(MdocError::Issuance(
@@ -428,6 +425,28 @@ fn tdate(value: &crate::time::Timestamp) -> Result<ciborium::Value, MdocError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_item_encoding_matches_schema_bytes_and_preserves_tag24() {
+        use ciborium::Value;
+        let opaque = vec![0xa2, 0x61, b'z', 0x01, 0x61, b'a', 0x02];
+        let value = Value::Array(vec![
+            Value::Tag(24, Box::new(Value::Bytes(opaque))),
+            Value::Bytes(vec![0x5a; 65_536]),
+        ]);
+        let random = [0x42; 32];
+        let actual = encode_item(0x7fff_ffff, &random, "portrait", &value).unwrap();
+        // The reference uses a separately assembled, schema-ordered Value map.
+        let reference = Value::Map(vec![
+            ("random".into(), Value::Bytes(random.to_vec())),
+            ("digestID".into(), Value::Integer(0x7fff_ffffu32.into())),
+            ("elementValue".into(), value),
+            ("elementIdentifier".into(), "portrait".into()),
+        ]);
+        let inner = data_item::encode_cbor(&reference).unwrap();
+        let expected = data_item::encode_cbor(&data_item::wrap_tag24(&inner)).unwrap();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn tdate_uses_second_precision_and_utc_z() {

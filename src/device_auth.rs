@@ -3,10 +3,7 @@
 use crate::error::MdocError;
 use crate::model::types::DeviceAuth;
 
-/// Result of a cryptographic comparison against caller-supplied payload bytes.
-///
-/// This primitive result does not authenticate an MSO or issuer, validate the
-/// payload's DeviceAuthentication schema, or establish request context or trust.
+/// Signature or MAC result for the supplied payload and key.
 #[derive(Clone, Debug)]
 pub struct DeviceAuthResult {
     /// Whether the signature or MAC matches the supplied bytes and key.
@@ -19,11 +16,10 @@ pub struct DeviceAuthResult {
 
 /// Check the cryptographic signature or MAC over the supplied detached payload.
 ///
-/// The intended payload is the complete `DeviceAuthenticationBytes` (Tag 24 and
-/// byte-string envelope included), constructed for the authenticated request
-/// context. This low-level operation accepts those bytes as given; it does not
-/// validate their schema or prove their provenance. Prefer
-/// [`crate::verify_presentation`] for wire presentations and authenticated claims.
+/// Supply complete `DeviceAuthenticationBytes`, including Tag 24 and its byte
+/// string envelope, for the authenticated request. The caller establishes the
+/// payload schema and key provenance. [`crate::verify_presentation`] performs
+/// these checks for a wire presentation.
 ///
 /// For `DeviceAuth::Signature`, checks the COSE_Sign1 using the supplied device
 /// public key. Authenticating that key in an issuer-signed MSO is a separate step.
@@ -64,16 +60,8 @@ fn verify_device_signature(
     let alg_id = crate::cose::validate_headers(&sign1.protected, &sign1.unprotected)?;
     let alg_name = crate::cose::cose_alg_to_name(alg_id).to_string();
 
-    // Build the Sig_structure for verification
-    // Sig_structure = ["Signature1", protected, external_aad, payload]
-    // For device auth, external_aad is empty and payload is DeviceAuthentication bytes
-    let sig_structure = coset::sig_structure_data(
-        coset::SignatureContext::CoseSign1,
-        sign1.protected.clone(),
-        None,
-        &[], // external_aad
-        device_authentication_bytes,
-    );
+    let sig_structure =
+        crate::cose::sign1_structure(&sign1.protected, device_authentication_bytes)?;
 
     let is_valid =
         crate::cose::verify_cose_signature(&sig_structure, &sign1.signature, device_key, alg_id)?;
@@ -91,10 +79,8 @@ fn verify_device_signature(
 
 /// Check an HMAC-256/256 COSE_Mac0 using an externally derived EMacKey.
 ///
-/// As with [`verify_device_auth`], success only authenticates the supplied bytes
-/// under this key. The caller must establish the ECDH peer key and the correct
-/// SessionTranscriptBytes binding when deriving the key; this function does not
-/// authenticate the MSO, issuer, payload schema, or request context.
+/// The caller establishes the ECDH peer key and SessionTranscriptBytes binding
+/// when deriving the key, and authenticates the issuer and payload schema.
 pub fn verify_device_mac(
     mac0: &coset::CoseMac0,
     device_authentication_bytes: &[u8],
@@ -124,13 +110,7 @@ pub fn verify_device_mac(
 
     crate::cose::validate_headers(&mac0.protected, &mac0.unprotected)?;
 
-    // Build Mac_structure
-    let mac_structure = coset::mac_structure_data(
-        coset::MacContext::CoseMac0,
-        mac0.protected.clone(),
-        &[], // external_aad
-        device_authentication_bytes,
-    );
+    let mac_structure = crate::cose::mac0_structure(&mac0.protected, device_authentication_bytes)?;
 
     // Compute HMAC-SHA256
     let mut hmac = Hmac::<Sha256>::new_from_slice(mac_key)

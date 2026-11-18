@@ -11,22 +11,20 @@ use std::collections::HashMap;
 /// Issuer authentication (COSE_Sign1 containing the MSO).
 #[derive(Clone, Debug)]
 pub struct IssuerAuth {
-    /// Original COSE object, including the received protected-header and payload
-    /// bytes. Decoding its claims does not authenticate them.
+    /// COSE object retaining the received protected-header and payload bytes.
     pub cose_sign1: CoseSign1,
 }
 
 impl IssuerAuth {
-    /// Wrap a COSE object. This does not validate its signature or trust chain.
+    /// Wrap an unverified COSE object.
     pub fn new(cose_sign1: CoseSign1) -> Self {
         Self { cose_sign1 }
     }
 
     /// Parse the MSO from its mandatory Tag 24 payload.
     ///
-    /// The returned data is structurally checked, but remains unauthenticated
-    /// until the issuer signature has been verified. The original payload is
-    /// never replaced by re-encoded data.
+    /// Returns structurally checked data and preserves the original payload.
+    /// Authenticate the issuer signature before using the claims.
     pub fn mso(&self) -> Result<Mso, MdocError> {
         let payload = self
             .cose_sign1
@@ -41,8 +39,8 @@ impl IssuerAuth {
 
     /// Borrow the leaf certificate's DER from the unprotected x5chain header.
     ///
-    /// Every chain element is checked before returning the leaf. The certificate
-    /// remains untrusted; its presence cannot install a trust anchor.
+    /// Checks every container element. The returned certificate requires
+    /// application path validation against trusted issuers.
     pub fn certificate_der(&self) -> Result<&[u8], MdocError> {
         let value = self.x5chain()?;
         validate_cert_chain(value)?;
@@ -56,8 +54,8 @@ impl IssuerAuth {
         }
     }
 
-    /// Extract a checked representation of the untrusted certificate chain.
-    /// This checks the container, not DER syntax, certificate signatures or trust.
+    /// Extract certificate bytes in x5chain order after checking the container.
+    /// The caller validates DER, certificate signatures and issuer trust.
     pub fn certificate_chain_der(&self) -> Result<Vec<Vec<u8>>, MdocError> {
         let value = self.x5chain()?;
         validate_cert_chain(value)?;

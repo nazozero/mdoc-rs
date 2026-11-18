@@ -4,9 +4,11 @@ use crate::error::MdocError;
 use coset::{AsCborValue, RegisteredLabelWithPrivate, iana};
 
 pub mod key;
+mod structure;
 mod verify;
 
 pub use key::{CoseKeyExt, cose_alg_to_name};
+pub(crate) use structure::{mac0_structure, sign1_structure};
 pub use verify::{validate_verification_key, verify_cose_signature};
 
 /// Check wire labels and decode without normalizing tags into field types.
@@ -60,7 +62,7 @@ pub(crate) fn validate_headers(
             ));
         }
     };
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen = 0u64;
     for (index, header) in [&protected.header, unprotected].into_iter().enumerate() {
         // Only alg, crit, kid and x5chain are processed by this profile.
         if header.content_type.is_some()
@@ -72,20 +74,24 @@ pub(crate) fn validate_headers(
         }
         let has_key_id =
             !header.key_id.is_empty() || (index == 0 && original_labels & (1 << 4) != 0);
-        if has_key_id && !seen.insert(coset::Label::Int(4)) {
-            return Err(MdocError::Cose(
-                "duplicate header across protected/unprotected buckets".into(),
-            ));
+        if has_key_id {
+            if seen & (1 << 4) != 0 {
+                return Err(MdocError::Cose(
+                    "duplicate header across protected/unprotected buckets".into(),
+                ));
+            }
+            seen |= 1 << 4;
         }
         for (label, _) in &header.rest {
             if *label != coset::Label::Int(33) {
                 return Err(MdocError::Cose("unsupported COSE header extension".into()));
             }
-            if !seen.insert(label.clone()) {
+            if seen & (1 << 33) != 0 {
                 return Err(MdocError::Cose(
                     "duplicate header across protected/unprotected buckets".into(),
                 ));
             }
+            seen |= 1 << 33;
         }
     }
     Ok(algorithm)

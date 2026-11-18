@@ -38,39 +38,42 @@ pub fn encode_cbor(value: &Value) -> Result<Vec<u8>, MdocError> {
 /// This operates on the explicit Value tree; pre-encoded Tag 24 contents remain
 /// byte strings, and unknown tags have no inferred semantic normalization.
 pub fn encode_cbor_canonical(value: &Value) -> Result<Vec<u8>, MdocError> {
-    let canonical = canonicalize(value, 0)?;
-    let bytes = encode_cbor(&canonical)?;
+    let mut bytes = Vec::new();
+    write_canonical(value, &mut bytes, 0)?;
     crate::cbor::raw::validate(&bytes)?;
     Ok(bytes)
 }
 
-/// Recursively rewrite a CBOR value into canonical form: every map's entries are
-/// sorted by the encoded bytes of their (already-canonicalized) keys, per
-/// RFC 8949 §4.2.1. Arrays and tag contents are canonicalized in place; scalars
-/// are returned unchanged.
-fn canonicalize(value: &Value, depth: usize) -> Result<Value, MdocError> {
+/// Write borrowed values in RFC 8949 core deterministic order. The caller
+/// validates the complete output envelope before using or returning it.
+pub(crate) fn write_canonical(
+    value: &Value,
+    out: &mut Vec<u8>,
+    depth: usize,
+) -> Result<(), MdocError> {
+    use crate::cbor::raw::{push_bytes, push_head, push_text};
+
     if depth > crate::cbor::raw::Limits::default().max_depth {
         return Err(MdocError::Cbor("CBOR nesting limit exceeded".into()));
     }
-    Ok(match value {
+    match value {
         Value::Map(entries) => {
-            // Canonicalize each key/value, encode the key, and sort by key bytes.
-            let mut keyed: Vec<(Vec<u8>, Value, Value)> = Vec::with_capacity(entries.len());
-            for (k, v) in entries {
-                let ck = canonicalize(k, depth + 1)?;
-                let cv = canonicalize(v, depth + 1)?;
-                let key_bytes = encode_cbor(&ck)?;
-                keyed.push((key_bytes, ck, cv));
+            let mut keyed = entries
+                .iter()
+                .map(|(key, value)| Ok((key_order(key)?, key, value)))
+                .collect::<Result<Vec<_>, MdocError>>()?;
+            keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            push_head(out, 5, entries.len() as u64);
+            for (_, key, value) in keyed {
+                write_canonical(key, out, depth + 1)?;
+                write_canonical(value, out, depth + 1)?;
             }
-            keyed.sort_by(|a, b| a.0.cmp(&b.0));
-            Value::Map(keyed.into_iter().map(|(_, k, v)| (k, v)).collect())
         }
         Value::Array(items) => {
-            let mut out = Vec::with_capacity(items.len());
+            push_head(out, 4, items.len() as u64);
             for item in items {
-                out.push(canonicalize(item, depth + 1)?);
+                write_canonical(item, out, depth + 1)?;
             }
-            Value::Array(out)
         }
         Value::Tag(tag @ (2 | 3), inner) => {
             let Value::Bytes(magnitude) = inner.as_ref() else {
@@ -82,10 +85,40 @@ fn canonicalize(value: &Value, depth: usize) -> Result<Value, MdocError> {
                         .into(),
                 ));
             }
-            Value::Tag(*tag, Box::new(canonicalize(inner, depth + 1)?))
+            push_head(out, 6, *tag);
+            write_canonical(inner, out, depth + 1)?;
         }
-        Value::Tag(tag, inner) => Value::Tag(*tag, Box::new(canonicalize(inner, depth + 1)?)),
-        other => other.clone(),
+        Value::Tag(tag, inner) => {
+            push_head(out, 6, *tag);
+            write_canonical(inner, out, depth + 1)?;
+        }
+        Value::Bytes(bytes) => push_bytes(out, bytes),
+        Value::Text(text) => push_text(out, text),
+        // Ciborium retains its preferred integer and floating-point encoding.
+        scalar => ciborium::into_writer(scalar, out)?,
+    }
+    Ok(())
+}
+
+// For the supported scalar keys, encoded-byte order is major type, shortest
+// integer/length argument, then string contents. No encoded key buffer is needed.
+fn key_order(key: &Value) -> Result<(u8, u64, &[u8]), MdocError> {
+    Ok(match key {
+        Value::Integer(integer) => {
+            let integer = i128::from(*integer);
+            if integer >= 0 {
+                (0, integer as u64, &[])
+            } else {
+                (1, (-1 - integer) as u64, &[])
+            }
+        }
+        Value::Bytes(bytes) => (2, bytes.len() as u64, bytes),
+        Value::Text(text) => (3, text.len() as u64, text.as_bytes()),
+        _ => {
+            return Err(MdocError::Cbor(
+                "unsupported compound or floating-point map key".into(),
+            ));
+        }
     })
 }
 

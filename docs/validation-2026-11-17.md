@@ -1,128 +1,78 @@
 # Validation record: 2026-11-17–18
 
-This record applies to runtime `d2f653d262da4c783ca6c430ef1f056f40baa25f`.
-It replaces the historical `2492f361` checkpoint previously recorded at this
-path. The raw evidence for earlier revisions remains separate and unchanged.
-This is implementation evidence, not an ISO/OpenID certification. The selected
-profile, unavailable licensed text and unsupported capabilities are described in
-[protocol-matrix.md](protocol-matrix.md).
+Historical results for runtime `d2f653d262da4c783ca6c430ef1f056f40baa25f`.
+This record preserves the source identities and measured results preceding
+issue #4. The [protocol matrix](protocol-matrix.md) describes the covered API.
 
 ## Source identities
 
 | Object | Exact identity |
 | --- | --- |
-| Production baseline | `9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc`, `mdoc-rs 0.2.0`, no default features, `issue` |
+| Baseline | `9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc`, `mdoc-rs 0.2.0`, no default features, `issue` |
 | Candidate runtime | `d2f653d262da4c783ca6c430ef1f056f40baa25f`, `nazo-mdoc 0.3.0` |
 | Candidate tree | `e04bdf111f1a849ed11082548207cb63987eb25d` |
-| CI merge commit | `051adc3f791a1e063511231be0a116267f7d2b3e`; its tree exactly equals the candidate tree |
-| NazoAuth integration base | `9560ea04bbc01a2da7b002eeeeb0ebe2e7dffbe9` |
-| Core review | [mdoc-rs PR 2](https://github.com/nazozero/mdoc-rs/pull/2) |
-| Application review | [NazoAuth PR 286](https://github.com/nazozero/NazoAuth/pull/286) |
+| CI merge commit | `051adc3f791a1e063511231be0a116267f7d2b3e`, with the same tree |
+| Review | [PR #2](https://github.com/nazozero/mdoc-rs/pull/2) |
 | Toolchain | Rust 1.100.0, `0ef1bc386059596dada8fb65b50425aab2ea637a`, LLVM 23.1.5 |
-
-Application dependencies pin a runtime revision. Later documentation-only
-commits do not require an artificial production dependency update.
 
 ## Executed core gates
 
 The [runtime CI run](https://github.com/nazozero/mdoc-rs/actions/runs/44124404106)
-completed all four jobs successfully: Rust, targets, fuzz and advisories.
+passed all four jobs: Rust, targets, fuzz and advisories.
 
-- Formatting, minimum/issue checks, all-target Clippy with warnings denied and
-  rustdoc with warnings denied passed.
-- No-default-features executed **131 tests**, `issue` executed **188**, and
-  all-features executed **193**, with zero failures and zero ignored tests in
-  each configuration. These configurations overlap; their counts are not added.
-- Explicit native builds succeeded for minimum and all features. Actual library
-  builds also succeeded for `wasm32-unknown-unknown` minimum and `issue,wasm-js`,
-  and `wasm32-wasip2` issue. These are artifact builds, not browser/WASM-runtime
-  execution tests. The application records its own actual WASM test executions.
+- Formatting, minimum/issue checks, all-target Clippy and rustdoc passed with
+  warnings denied.
+- No-default-features ran **131 tests**, `issue` ran **188**, and all-features ran
+  **193**, each with zero failures or ignored tests.
+- Native minimum/all-feature builds and WASM builds passed:
+  `wasm32-unknown-unknown` minimum and `issue,wasm-js`; `wasm32-wasip2` issue.
+  These checks built artifacts; they did not execute a WASM runtime.
 - The seeded CI fuzz campaign completed **445,893 runs in 121 seconds**, starting
-  with five seeds, with successful process exit and ASan/LSan enabled. It reaches
-  bounded CBOR, COSE, MSO, issued/presentation verification, Timestamp and
-  FullDate. This finite campaign does not establish exhaustive input coverage.
-- Property tests cover malformed bytes without panic, duplicate keys, status
-  presence/unknown mechanisms/index bounds, and Final transcript binding.
-- ISO Annex D, the Final Redirect/DC API examples, RFC 6979 P-384 and RFC 8032
-  Ed25519 vectors have recorded provenance. MAC/HKDF fixtures are independent
-  synthetic vectors, not mislabelled as official test vectors.
+  with five seeds, with ASan/LSan enabled. It covered CBOR, COSE, MSO, issued and
+  presentation verification, Timestamp and FullDate.
+- Property tests covered malformed bytes, duplicate keys, status preservation,
+  index bounds and Final transcript binding. Fixed vectors covered ISO Annex D,
+  official Final handovers, RFC 6979 P-384 and RFC 8032 Ed25519. Independent
+  synthetic vectors covered MAC/HKDF.
 
-The production baseline executed 49 issue-feature and 63 all-feature tests.
-Some inherited ISO test files were gated by TSP and executed no tests in the
-production configuration; a file's existence is not execution evidence.
+The baseline ran 49 issue-feature and 63 all-feature tests. Its TSP-gated ISO
+tests were inactive under the issue-only configuration.
 
-### Regressions demonstrated before and after the corrections
+Eleven wire-type regressions failed on `d52cfca` and passed on this runtime:
+Tag 2/3 preservation, rejection of undefined, native integer fields and preferred
+bignum issuance. Six further regressions failed on `e9309b7d` and passed here:
+minor-version compatibility in MSO and DeviceResponse, authenticated minor
+versions, positive RFU keyInfo preservation and device namespace cardinality on
+both receive and holder-preparation paths.
 
-The same eleven wire-type regressions fail on the exact `d52cfca` checkpoint
-and pass in the current suite. CBOR Tag 2/3 is preserved through protocol
-projection; undefined is rejected instead of becoming null; canonical issuance
-rejects nonpreferred bignum inputs. Some negative cases use independently valid
-signatures/MACs over invalid COSE header types. RFC 8949 allows extended numeric
-equivalence: this correction enforces the application's native-wire-type and
-extension-preservation contract, rather than alleging that a general-purpose
-CBOR decoder violates RFC 8949.
+An earlier local fuzz invocation failed at LeakSanitizer teardown. A subsequent
+local ASan run disabled leak detection; the successful CI campaign above used
+both ASan and LSan. Earlier results remain attached to their own revisions.
 
-Six additional tests were compiled and executed against the preceding `e9309b7d`
-checkpoint. All six failed actual assertions and pass on this runtime:
+## Advisory snapshot
 
-- Unknown numeric minor MSO versions are accepted and preserved.
-- Unknown minor DeviceResponse versions reach authentication.
-- Compatible minor versions retain both issuer and holder authentication.
-- Positive RFU keyInfo is preserved without creating device authorization.
-- A present device namespace cannot contain an empty DeviceSignedItems map.
-- External holder preparation rejects the same invalid empty namespace.
+CI audited 142 packages against 1,527 advisories and passed
+`cargo audit --deny warnings`. Independent scans against RustSec revision
+`233155b4025b854c68a4b199c0e32d7fd53291a2` found zero vulnerabilities and warnings
+in the root, candidate consumer and fuzz lockfiles.
 
-ISO 18013-5 §§8.1 and 9.1.2.4 require the minor-version and positive-RFU behavior;
-§8.3.2.1.2.2 defines the device namespace cardinality. Unknown security semantics
-outside those designated RFU labels remain subject to explicit profile support.
-The supported CBOR data model still limits retained extension values; this is
-not a claim to accept every possible CBOR value.
-
-An earlier local fuzz invocation completed its mutation phase but failed at
-LeakSanitizer teardown in the restricted process environment. It remains a
-failed invocation. A later local ASan run explicitly disabled leak detection;
-the GitHub campaign above does not depend on that local exception. Earlier
-campaigns are retained under their own revisions, not added to this run.
-
-## Advisory snapshot and maintenance scope
-
-The runtime CI audited 142 packages against 1,527 advisories and passed
-`cargo audit --deny warnings`. Independent local scans used the clean RustSec
-snapshot `233155b4025b854c68a4b199c0e32d7fd53291a2`: the candidate root lockfile has
-**zero vulnerabilities and zero warnings**; the candidate consumer and fuzz
-lockfiles also pass. The ownership/cardinality follow-up changes no dependencies.
-
-The Chrono maintenance advisory
-[RUSTSEC-2026-0543](https://github.com/rustsec/advisory-db/blob/main/crates/chrono/RUSTSEC-2026-0543.md)
-was published during this work. The core and its tests were migrated to maintained
-`time`, with explicit, tested leap-second and precision handling. This is a
-maintenance advisory, not a newly demonstrated memory-safety exploit. Earlier
-clean scans against 1,509 advisories are historical results only.
-
-The comparison and baseline consumers intentionally keep the real baseline's
-Chrono dependency. Their strict audits report that warning and fail; it is not
-suppressed and the baseline source is not changed. The old complete library
-lockfile also has 15 vulnerability advisories in optional components removed
-from the core. None of those 15 is in the baseline production `issue` normal
-dependency graph; they are not 15 demonstrated reachable production flaws.
-
-NazoAuth still uses Chrono in unrelated application APIs, persistence models and
-workspace crates. Its application PR records that strict-gate issue and a
-separate targeted Actix security update. Core CI success does not establish
-that every host release gate passes.
+The core and tests migrated to `time` after the Chrono maintenance advisory
+[RUSTSEC-2026-0543](https://github.com/rustsec/advisory-db/blob/main/crates/chrono/RUSTSEC-2026-0543.md).
+The historical comparison and baseline consumer retain Chrono; their strict
+audits report the warning and fail. The old complete lockfile also contains 15
+vulnerability advisories in optional components, all outside its issue-only
+normal dependency graph.
 
 ## Recorded runtime performance: run-04
 
-Both variants were measured on Linux x86-64, AMD EPYC 9V74, in one release
-executable pinned to permitted CPU 0. Each case uses 100 warmups and 1,000
-observations in alternating AB/BA order. Both enable only production `issue`
-features. Cargo dependencies/features are unified in this microbenchmark;
-independent artifact measurements below use separate consumers and lockfiles.
+Linux x86-64, AMD EPYC 9V74, one release executable pinned to permitted CPU 0.
+Each case used 100 warmups and 1,000 observations in alternating AB/BA order,
+with `issue` features. Shared Cargo dependencies/features were unified.
 
-Times below are **thread CPU microseconds**, with nearest-rank P50/P95/P99.
-Elapsed samples are retained separately. Output destruction is included;
-fixture setup and file output are excluded. Allocation measurements use a
-separate invocation with counters disabled during timing.
+The table records **thread CPU microseconds** at nearest-rank P50/P95/P99.
+Elapsed samples were recorded separately. Timing includes result destruction
+and excludes fixture setup and file output. Allocations were measured in a
+separate invocation, with counters disabled during timing.
 
 | Operation | Baseline CPU P50/P95/P99 | Candidate CPU P50/P95/P99 |
 | --- | --- | --- |
@@ -138,9 +88,10 @@ separate invocation with counters disabled during timing.
 | Final Redirect transcript validation/borrow | No equivalent baseline API | 0.430 / 0.461 / 0.560 |
 | Final DC API transcript validation/borrow | No equivalent baseline API | 0.391 / 0.501 / 0.661 |
 
-The identical coset operation is an unchanged-code control. Shared-host cache
-and scheduling effects remain visible even in thread CPU tails; one run of
-1,000 samples per case is not a statistical service SLA. No outliers were removed.
+
+The identical coset operation serves as an unchanged-code control. Sampling ran
+on a shared virtual host after local compilation and large I/O were paused.
+All observations were retained, including scheduling and cache variability.
 
 | Operation | Baseline allocation calls / requested bytes | Candidate allocation calls / requested bytes |
 | --- | ---: | ---: |
@@ -155,40 +106,33 @@ and scheduling effects remain visible even in thread CPU tails; one run of
 | Final Redirect transcript validation/borrow | — | 0 / 0 |
 | Final DC API transcript validation/borrow | — | 0 / 0 |
 
-Allocation bytes count successful requested capacities, including the full new
-size of reallocations; they are not peak heap, retained bytes or copied bytes.
-DeviceResponse parsing makes 48.28% fewer allocations and requests 45.59% fewer
-bytes. MSO parsing makes 29.67% fewer allocations and requests 31.66% fewer bytes.
-The two transcript validators retain pointer identity and recorded zero
-allocation calls/bytes in all 1,000 samples each. That narrow zero-copy/zero-
-allocation result does not describe the complete parser or verifier.
 
-MSO projection now consumes owned intermediate values; uniqueness checks borrow
-local strings/byte slices. One public DeviceResponse model replaces redundant
-response/request placeholders. No extra public lifetime or unsafe access path
-was introduced to obtain these reductions. Authenticated raw bytes remain intact.
+Requested bytes count successful allocation capacities, including each full
+reallocation size. DeviceResponse parsing reduced allocation calls by 48.28%
+and requested bytes by 45.59%; MSO parsing reduced them by 29.67% and 31.66%.
+The two borrowed transcript validators preserved pointer identity and recorded
+zero allocations in each sample.
 
-Issuance's approximately **5.09x** median CPU cost is a real regression. Candidate
-issuance additionally validates schema, key and certificate context and confirms
-the completed signature against the leaf certificate key. The same real local
-fixture signer is used for both variants. NazoAuth's external signer checks its
-leased JWK, a different binding from the certificate key. Required checks were
-not removed to improve timing. Successful old API returns do not establish that
-old random digest IDs always satisfy ISO's range; see [migration.md](migration.md).
+Issuance increased median CPU cost by **5.09×**. Added work includes schema,
+key/certificate validation and signature confirmation against the certificate
+key. MSO parsing and inner CBOR decoding also increased CPU time. These costs
+are the starting point for [issue #4](https://github.com/nazozero/mdoc-rs/issues/4).
 
-The old DeviceAuthentication constructor omits the required outer Tag 24; its
-construction timing is retained but excluded from equivalent-output speedup
-claims. The old full verifier rejects the valid Final fixture; timing that
-failure would not measure successful verification. NazoAuth's previous adapter
-already compensated for this and is measured separately in its integration PR.
+Two legacy operations have different contracts: the old DeviceAuthentication
+constructor omits outer Tag 24, and the old full verifier rejects the valid
+Final fixture. Their timings remain distinct from successful equivalent-output
+comparisons. The full protocol row returns pending external trust and excludes
+transcript construction, X.509 path validation, revocation, status fetching and
+application admission.
 
 ## Independent structure measurements
 
-These consumers parse the same runtime-provided Annex D bytes, using separate
-lockfiles and identical release opt-level 3, thin LTO and one codegen unit.
-Normal dependencies exclude the core itself, dev/build edges and inactive
-targets; reachable proc macros remain included. Source lines include comments
-and inline tests and are not semantic SLOC.
+Separate consumers parsed the same runtime-provided Annex D bytes, with
+independent lockfiles and release opt-level 3, thin LTO and one codegen unit.
+Normal package counts exclude the core, dev/build edges and inactive targets;
+reachable proc macros are included. Rust line counts include comments and tests.
+Rlib bytes include code, IR and metadata; parser binaries represent that linked
+use case.
 
 | Configuration | Normal packages | Rust files / lines | Release rlib bytes | Parser binary bytes |
 | --- | ---: | ---: | ---: | ---: |
@@ -197,18 +141,17 @@ and inline tests and are not semantic SLOC.
 | Candidate issue | 89 | 25 / 5,228 | 2,557,204 | 656,736 |
 | Candidate all features, host | 89 | 25 / 5,228 | 2,570,430 | 656,760 |
 
-For production `issue`, dependencies decrease 7.29%, rlib size increases 4.51%,
-and the parser binary increases 2.11%. Source has 3.50% more lines by this
-definition. There is no claim that all code or artifacts became smaller.
 
-## Reproduction and raw evidence
+For `issue`, normal packages decreased 7.29%, rlib bytes increased 4.51%,
+parser binary bytes increased 2.11%, and counted source lines increased 3.50%.
 
-[benchmarks/compare](../benchmarks/compare/README.md) contains the executable,
-allocator self-check, independent consumers, collector and CSV summarizer.
-Evidence retains all **27,000 raw observations**, quantiles, hashes, actual
-public CBOR inputs, Cargo artifacts, commands, build logs, audit JSON and failed
-or historical runs. An independent replay of the summarizer and source/input
-hash checks matched the recorded results.
+## Reproduction and evidence
+
+[benchmarks/compare](../benchmarks/compare/README.md) contains the harness,
+allocator self-check, independent consumers, collector and summarizer. Recorded
+evidence includes 27,000 observations, quantiles, public inputs, hashes, Cargo
+artifacts, build logs, audit JSON and failed/historical runs. The recorded
+summarizer replay and source/input hash checks matched.
 
 | Recorded object | SHA-256 |
 | --- | --- |
@@ -217,17 +160,11 @@ hash checks matched the recorded results.
 | Annex D input, 3,529 bytes | `3908aabd02e0605e7549913f5f14a8bb24155325584d5097a5ad7161e8549919` |
 | Synthetic Final response, 1,353 bytes | `559c35ebd5260f08ba6b63e507f93da4a021657efaaa7d58f93da75b70661a69` |
 
-The executable was built before publication and its complete 32-file source
-manifest was independently matched to the published runtime's exact bytes.
-Our local compilers and large I/O operations were paused for sampling; the
-shared virtual host was not a dedicated physical benchmark machine.
 
-`run-01` predates the maintained time backend; `run-02` measured `d52cfca` before
-tag preservation; `run-03` measured `2492f361` before the minor-version/RFU/
-namespace and ownership follow-up. Their raw evidence remains historical.
-No timing value was edited and no baseline runtime source was modified.
+The executable's 32-file source manifest matched the published runtime.
+`run-01` preceded the time backend, `run-02` used `d52cfca` before tag
+preservation, and `run-03` used `2492f361` before the version, RFU, namespace and
+ownership corrections.
 
-The full protocol row excludes transcript creation/context binding completed
-before the timer, X.509 path trust, certificate revocation, credential-status
-HTTP, final application admission and endpoint latency. Those are separately
-reported application responsibilities, not missing costs hidden inside this row.
+The original record is preserved in
+[Git history](https://github.com/nazozero/mdoc-rs/blob/209093017917eb389b37b1e54a542b201c1c5467/docs/validation-2026-11-17.md).

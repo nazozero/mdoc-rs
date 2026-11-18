@@ -6,8 +6,7 @@ rust-version = "1.100"
 publish = false
 license = "BSD-2-Clause"
 
-# A separate lockfile/target prevents benchmark-only dependencies from entering
-# the core package or NazoAuth's dependency graph.
+# A separate workspace keeps benchmark dependencies outside the library.
 [workspace]
 
 [dependencies]

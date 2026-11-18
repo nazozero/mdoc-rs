@@ -1,12 +1,8 @@
-//! UTC timestamps for protocol validation, backed by the maintained `time` crate.
+//! UTC timestamps for protocol validation, backed by `time`.
 //!
-//! Calendar validation, RFC 3339 parsing/formatting and Unix conversion are
-//! delegated to `time`. This small type retains the distinction between a whole
-//! positive leap second and the preceding ordinary second. Neither a leap
-//! second nor its ordering may silently become a Unix timestamp.
-//!
-//! It does not implement calendar arithmetic, a leap-second schedule or a time
-//! zone database. The ISO MSO profile additionally requires whole UTC seconds.
+//! `time` handles calendar validation and RFC 3339 parsing/formatting. This type
+//! preserves whole leap seconds and their ordering; Unix conversion returns
+//! `None` for a leap second. The MSO wire profile requires whole UTC seconds.
 
 use ::time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 use std::{cmp::Ordering, str::FromStr};
@@ -46,12 +42,11 @@ impl Timestamp {
     /// Parse a bounded RFC 3339 timestamp and normalize its offset to UTC.
     ///
     /// This protocol API requires an uppercase `T` separator and at most nine
-    /// fractional digits. Extra digits reject instead of silently losing
-    /// precision before an issuer compares the original validity interval.
+    /// fractional digits. Extra digits reject to preserve interval precision.
     /// Ordinary fractional seconds are retained. Positive leap seconds must be
     /// whole seconds; fractional leap seconds are outside this protocol type.
     /// The `time` parser validates the calendar and possible UTC leap-second
-    /// position. No claim is made that an IERS table confirmed that occurrence.
+    /// position; checking an actual occurrence requires an external schedule.
     pub fn parse_rfc3339(text: &str) -> Result<Self, MdocError> {
         let bytes = text.as_bytes();
         if !(20..=35).contains(&bytes.len()) || bytes.get(10) != Some(&b'T') {

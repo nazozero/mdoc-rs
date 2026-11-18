@@ -1,0 +1,33 @@
+[package]
+name = "mdoc-core-benchmark"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+license = "BSD-2-Clause"
+
+[workspace]
+
+[features]
+default = []
+baseline = ["dep:baseline"]
+candidate = ["dep:candidate"]
+
+[dependencies]
+baseline = { package = "nazo-mdoc", git = "https://github.com/nazozero/mdoc-rs", rev = "070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc", optional = true, default-features = false, features = ["issue"] }
+candidate = { package = "nazo-mdoc", path = "../..", optional = true, default-features = false, features = ["issue"] }
+ciborium = "0.2"
+coset = "0.4.2"
+der = "0.7"
+hex = "0.4"
+libc = "0.2"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "alloc"] }
+sha2 = "0.10"
+signature = "3"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = 1

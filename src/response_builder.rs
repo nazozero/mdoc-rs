@@ -1,9 +1,9 @@
 //! Prepare device authentication for an external signer.
 //!
 //! Private keys, ECDH, signer selection and request authorization belong to the
-//! host. This module prepares the exact COSE Sig_structure, then verifies the
-//! returned signature against the MSO device public key before assembling a
-//! detached `DeviceSignature`. It does not establish issuer trust.
+//! application. This module prepares the COSE Sig_structure and verifies the
+//! returned signature against the MSO device key before assembling a detached
+//! `DeviceSignature`.
 
 use std::collections::HashMap;
 
@@ -18,8 +18,7 @@ use crate::session::{SessionTranscript, build_device_authentication_validated};
 
 /// A device-signature operation awaiting an externally produced signature.
 ///
-/// The private fields retain the exact signing input and the document to which
-/// it belongs. There is no private-key parameter or signer trait in the core.
+/// Retains the exact signing input and its document until completion.
 #[derive(Debug)]
 #[must_use = "send signing_input to the holder's signer and complete with finish"]
 pub struct PreparedDeviceAuthentication {
@@ -41,9 +40,8 @@ pub struct PreparedDeviceAuthentication {
 /// represented as `[0xd8, 0x18, 0x41, 0xa0]`.
 ///
 /// The caller must authorize the request and obtain this document from a source
-/// whose issuer trust has been established. Preparing a proof does not verify
-/// the issuer signature or credential status. An existing device proof, if any,
-/// is replaced only after the new signature passes verification in `finish`.
+/// whose issuer signature, trust and status have been verified. An existing
+/// device proof is replaced after the new signature passes `finish`.
 pub fn prepare_device_authentication(
     document: IssuerSignedDocument,
     transcript: &SessionTranscript<'_>,
@@ -78,13 +76,7 @@ pub fn prepare_device_authentication(
         original_data: Some(header.clone().to_vec()?),
         header,
     };
-    let signing_input = coset::sig_structure_data(
-        coset::SignatureContext::CoseSign1,
-        protected.clone(),
-        None,
-        &[],
-        &payload,
-    );
+    let signing_input = crate::cose::sign1_structure(&protected, &payload)?;
     Ok(PreparedDeviceAuthentication {
         document,
         name_spaces,

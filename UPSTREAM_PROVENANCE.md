@@ -1,30 +1,22 @@
-# Imported-source provenance
+# Source provenance
 
-This document records the historical controlled source import used by NazoAuth.
-The repository now maintains the `nazo-mdoc` protocol-core continuation; it is
-not the original upstream `mdoc-rs` repository or an upstream release. The import
-facts below remain unchanged by the later package rename and architectural work.
+Derived from [mdoc-rs](https://github.com/kushaldas/mdoc-rs) by Kushal Das,
+licensed under BSD-2-Clause.
 
-## crates.io baseline
+| Import | Identity |
+| --- | --- |
+| Package | `mdoc-rs 0.2.0` |
+| crates.io archive SHA-256 | `e571fd42535e0893a53662ac9f631474b6258b169ef4b93f214f0469ca9e647e` |
+| Published VCS revision | `60053a175e6c926a0121d1df29c6524995591c5b` |
+| Imported file hashes | [UPSTREAM_FILES.sha256](UPSTREAM_FILES.sha256) |
+| Baseline tag | `upstream-crates-io-v0.2.0` |
 
-- Package: `mdoc-rs 0.2.0`
-- crates.io archive SHA-256/checksum:
-  `e571fd42535e0893a53662ac9f631474b6258b169ef4b93f214f0469ca9e647e`
-- Repository declared by the package:
-  `https://github.com/kushaldas/mdoc-rs`
-- VCS revision recorded in the published package:
-  `60053a175e6c926a0121d1df29c6524995591c5b`
-- Declared license: `BSD-2-Clause`
-- Package content hashes: `UPSTREAM_FILES.sha256`
+The upstream repository was unavailable at import. The baseline was reconstructed
+from the published archive, excluding Cargo's `.cargo-ok` extraction marker and
+`.cargo_vcs_info.json`; the latter's revision is recorded above. The archive
+declared BSD-2-Clause without a standalone license file. [LICENSE](LICENSE)
+contains that license and the original author attribution.
 
-The declared upstream repository was unavailable when this mirror was
-created, so its Git history could not be imported. The baseline commit in this
-repository was reconstructed byte-for-byte from the published crates.io
-archive, excluding Cargo's local extraction marker `.cargo-ok` and the
-archive's `.cargo_vcs_info.json`. The latter is recorded above as provenance
-instead of being committed in a way that could imply this mirror has the
-upstream Git identity.
-
-The crates.io archive did not include a standalone license file. This mirror
-adds the standard BSD-2-Clause text and attributes it to Kushal Das, matching
-the package's declared license and publisher identity.
+Version 0.3 continues from `9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc`.
+Earlier maintenance records remain in Git history; API changes are described in
+[migration](docs/migration.md).

@@ -3,7 +3,6 @@
 //! Public keys, messages and signatures are copied from the cited RFC vectors;
 //! no signing operation or private key is used to derive an expected answer.
 //! These test the algorithm/key dispatch and fixed-width signature primitive.
-//! They are not complete COSE_Sign1, ISO mdoc, or certification test vectors.
 //!
 //! Sources:
 //! - RFC 6979 Appendix A.2.6, NIST P-384 with SHA-384 ("sample" and "test"):

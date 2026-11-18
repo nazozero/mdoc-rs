@@ -266,41 +266,67 @@ impl<'a> Item<'a> {
     }
 
     pub(crate) fn value(self) -> Result<ciborium::Value, MdocError> {
-        use ciborium::Value;
-
-        let (major, argument, head) = header(self.bytes)?;
-        // Ciborium's generic Value decoder normalizes small Tag 2/3 bignums
-        // into Integer. Protocol field types and the host's extension policy
-        // must see those tags. Walk only containers/tags here and leave scalar
-        // representation (including floating-point decoding) to ciborium.
-        Ok(match major {
-            4 => {
-                let mut values = Vec::with_capacity(length(argument)?);
-                for item in self.array()? {
-                    values.push(item?.value()?);
-                }
-                Value::Array(values)
-            }
-            5 => {
-                let mut values = Vec::with_capacity(length(argument)?);
-                for entry in self.map()? {
-                    let (key, value) = entry?;
-                    values.push((key.value()?, value.value()?));
-                }
-                Value::Map(values)
-            }
-            6 => Value::Tag(
-                argument,
-                Box::new(
-                    Self {
-                        bytes: &self.bytes[head..],
-                    }
-                    .value()?,
-                ),
-            ),
-            _ => ciborium::from_reader(self.bytes).map_err(|e| error(&e.to_string()))?,
-        })
+        let mut remaining = self.bytes;
+        let value = project(&mut remaining)?;
+        debug_assert!(remaining.is_empty());
+        Ok(value)
     }
+}
+
+// Consume one item from a validated envelope. The cursor visits each encoded
+// value once; tags retain their identity and Tag 24 contents remain byte strings.
+fn project(remaining: &mut &[u8]) -> Result<ciborium::Value, MdocError> {
+    use ciborium::Value;
+
+    let original = *remaining;
+    let (major, argument, head) = header(original)?;
+    *remaining = &original[head..];
+    Ok(match major {
+        0 => Value::Integer(argument.into()),
+        1 => Value::Integer(
+            (-1 - i128::from(argument))
+                .try_into()
+                .expect("CBOR negative integer fits the value model"),
+        ),
+        2 | 3 => {
+            let (bytes, tail) = remaining.split_at(length(argument)?);
+            *remaining = tail;
+            if major == 2 {
+                Value::Bytes(bytes.to_vec())
+            } else {
+                Value::Text(
+                    std::str::from_utf8(bytes)
+                        .expect("validated CBOR text")
+                        .to_owned(),
+                )
+            }
+        }
+        4 => {
+            let count = length(argument)?;
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                values.push(project(remaining)?);
+            }
+            Value::Array(values)
+        }
+        5 => {
+            let count = length(argument)?;
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                values.push((project(remaining)?, project(remaining)?));
+            }
+            Value::Map(values)
+        }
+        6 => Value::Tag(argument, Box::new(project(remaining)?)),
+        7 => match original[0] {
+            0xf4 => Value::Bool(false),
+            0xf5 => Value::Bool(true),
+            0xf6 => Value::Null,
+            // Keep ciborium's IEEE 754 conversion for all three wire widths.
+            _ => ciborium::from_reader(&original[..head]).map_err(|e| error(&e.to_string()))?,
+        },
+        _ => unreachable!("validated CBOR major type"),
+    })
 }
 
 // A second, allocation-free span walk. Values are immutable and were bounded
@@ -364,7 +390,6 @@ impl<'a> Iterator for Map<'a> {
 }
 
 /// Append a shortest CBOR integer/length header without constructing a Value.
-#[cfg(feature = "issue")]
 pub(crate) fn push_head(out: &mut Vec<u8>, major: u8, value: u64) {
     let prefix = major << 5;
     match value {
@@ -385,10 +410,14 @@ pub(crate) fn push_head(out: &mut Vec<u8>, major: u8, value: u64) {
     }
 }
 
-#[cfg(feature = "issue")]
 pub(crate) fn push_text(out: &mut Vec<u8>, value: &str) {
     push_head(out, 3, value.len() as u64);
     out.extend_from_slice(value.as_bytes());
+}
+
+pub(crate) fn push_bytes(out: &mut Vec<u8>, value: &[u8]) {
+    push_head(out, 2, value.len() as u64);
+    out.extend_from_slice(value);
 }
 
 #[cfg(feature = "issue")]

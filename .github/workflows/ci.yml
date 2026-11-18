@@ -1,7 +1,7 @@
 name: protocol-core
 on:
   push:
-    branches: [main, nazoauth/patched-rustcrypto, refactor/nazo-mdoc-core]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:

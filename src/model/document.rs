@@ -36,10 +36,8 @@ pub struct DeviceSigned {
     /// The exact, complete `DeviceNameSpacesBytes = #6.24(bstr .cbor DeviceNameSpaces)`
     /// field, including its Tag 24 and byte-string header.
     ///
-    /// These must be preserved verbatim so device authentication can be
-    /// verified over the canonical `DeviceAuthentication` structure
-    /// (ISO 18013-5 §9.1.3.1) — re-encoding the decoded `name_spaces` map could
-    /// produce different bytes and break the signature/MAC check.
+    /// DeviceAuthentication embeds these bytes verbatim when constructing
+    /// the signature or MAC input (ISO 18013-5 §9.1.3.1).
     pub name_spaces_bytes: Vec<u8>,
 }
 

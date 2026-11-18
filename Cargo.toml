@@ -1,10 +1,10 @@
 [package]
 name = "nazo-mdoc"
 version = "0.3.0"
-authors = ["NazoZero Contributors", "Kushal Das"]
+authors = ["NazoZero", "Kushal Das"]
 edition = "2024"
 rust-version = "1.100"
-description = "Bounded ISO mdoc protocol core with external signing and explicit trust boundaries"
+description = "ISO mdoc issuance, parsing and signature verification"
 repository = "https://github.com/nazozero/mdoc-rs"
 license = "BSD-2-Clause"
 readme = "README.md"
