@@ -1,0 +1,34 @@
+name: Publish to crates.io
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check the release version
+        run: bash .github/scripts/check-release-version.sh
+
+      # After the first publish, register this workflow on crates.io and remove the bootstrap secret.
+      - name: Authenticate with crates.io Trusted Publishing
+        id: auth
+        if: env.CRATES_IO_BOOTSTRAP_TOKEN == ''
+        env:
+          CRATES_IO_BOOTSTRAP_TOKEN: ${{ secrets.CRATES_IO_BOOTSTRAP_TOKEN }}
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      - name: Publish crate
+        run: cargo publish --locked --registry crates-io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_BOOTSTRAP_TOKEN || steps.auth.outputs.token }}
