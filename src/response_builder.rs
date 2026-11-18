@@ -122,7 +122,7 @@ pub fn prepare_device_authentication_borrowed<'a>(
     algorithm: i64,
 ) -> Result<PreparedDeviceAuthenticationRef<'a>, MdocError> {
     let (signature, name_spaces) = prepare_signature(
-        document.issuer_signed.issuer_auth.parsed_mso()?,
+        document.issuer_signed.issuer_auth.mso()?,
         document.doc_type,
         transcript,
         device_name_spaces_bytes,

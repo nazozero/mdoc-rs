@@ -58,6 +58,11 @@ payload address and length are unchanged and the original parsing limits were
 no wider than the defaults. Public mutable models and wider custom limits return
 through the normal boundary checks.
 
+The final review consolidated the public `IssuerAuthRef::mso()` accessor and its
+private counterpart. The public accessor now reuses that proof, removing an additional
+CBOR scan when reading an MSO from a parsed borrowed credential. Independent MSO
+input and replaced payloads still pass through the normal parser.
+
 ECDSA verification uses RustCrypto's multipart verifier; HMAC updates the message
 fragments directly. Key coordinates use a fixed stack buffer, and certificate
 SPKI verification creates the verification key directly. Prepared operations
@@ -154,7 +159,7 @@ needlessly borrowed test expression and the successful final run after its fix.
 | --- | --- |
 | Previous main | `752b402e2d4e29407eb1e9ad81eeca5c085b235e` |
 | Retained previous executable build | `de10f77447a4e09563589bc71fdc94eb15bb2539`; its 28 library source/manifest hashes match previous main |
-| Current source and executable build | `27c68b248260c7c0c0c4268b1cf9f44413241eb0` |
+| Measured source and executable build | `27c68b248260c7c0c0c4268b1cf9f44413241eb0` |
 | Previous executable SHA-256 | `eb4d481e65ea2db5d64492f460392c9932bfea94f9a24cb215d8a644c9384e65` |
 | Current executable SHA-256 | `d94df1e8e05d9efed574d9f18fae82ad8a87d2254ba4dd0e4de2040252141633` |
 
@@ -164,6 +169,10 @@ keeps the preceding dependency graph; the current one uses the updated graph.
 The runner labels identify the experiment, independently of the build's internal
 `candidate` feature name. The older harness's `baseline_revision=070e...` field
 is historical configuration, not the baseline used in this experiment.
+
+These measurements precede the final public MSO accessor consolidation. The
+measured standalone MSO parser, verifier and holder preparation retain their
+existing algorithm paths; the accessor cleanup has no separate timing result.
 
 Each process runs on CPU 0 of the shared AMD EPYC 9V74 host. Compilation finishes
 before measurement, and source remains frozen during all runs. Four alternating

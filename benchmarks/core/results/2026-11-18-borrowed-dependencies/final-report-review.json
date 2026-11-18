@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-18",
+  "report_path": "docs/borrowed-dependencies-2026-11-18.md",
+  "reviewed_sha256": "0647b64b609d54f7902278bebf405304f278da9559eebcaa5a4a430fc44a23ce",
+  "previous_reviewed_sha256": "287b3ab0b37e501bb35021e8a28b4d6676c3e29021bd2f19e9d45f68986960a7",
+  "retained_recalculation": {
+    "path": "independent-recalculation.json",
+    "sha256": "6c1f3fea7fd6c1aede375975808289744030f07f240959db96d1b7a425cb802d",
+    "unchanged": true
+  },
+  "measured_source": "27c68b248260c7c0c0c4268b1cf9f44413241eb0",
+  "scope": "Reviewed the report additions describing the final public MSO accessor consolidation and distinguishing its source from the measured executable. All numerical tables and archived measurements remain unchanged.",
+  "source_review": "The public borrowed IssuerAuthRef::mso accessor now uses the existing exact-payload and parsing-budget proof. Verifier and holder preparation call the same implementation previously named parsed_mso. The measured standalone MsoRef::parse and owned IssuerAuth::mso paths are unchanged.",
+  "timing_scope": "The retained measurements precede the final accessor consolidation. No separate timing result is attributed to that cleanup.",
+  "evidence_preservation": "The prior independent recalculation, its recorded report hash, the raw archive and its manifest are retained unchanged. This separate record identifies the later reviewed report."
+}

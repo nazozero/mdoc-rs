@@ -381,14 +381,6 @@ pub struct IssuerAuthRef<'a> {
 
 impl<'a> IssuerAuthRef<'a> {
     pub fn mso(&self) -> Result<MsoRef<'a>, MdocError> {
-        MsoRef::parse(
-            self.cose_sign1
-                .payload
-                .ok_or_else(|| MdocError::Mso("missing COSE_Sign1 payload".into()))?,
-        )
-    }
-
-    pub(crate) fn parsed_mso(&self) -> Result<MsoRef<'a>, MdocError> {
         if let Some(validated) = self.validated_mso_payload
             && self.cose_sign1.payload.is_some_and(|current| {
                 // Both address and length must match: public fields can be
@@ -398,7 +390,11 @@ impl<'a> IssuerAuthRef<'a> {
         {
             return super::issuer_auth::parse_mso_ref(validated.embedded()?);
         }
-        self.mso()
+        MsoRef::parse(
+            self.cose_sign1
+                .payload
+                .ok_or_else(|| MdocError::Mso("missing COSE_Sign1 payload".into()))?,
+        )
     }
 
     pub fn certificate_chain_der(&self) -> Result<Vec<&'a [u8]>, MdocError> {
@@ -685,7 +681,7 @@ pub struct StatusListInfoRef<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn parsed_mso_proof_cannot_be_reused_for_a_replaced_payload() {
+    fn mso_proof_cannot_be_reused_for_a_replaced_payload() {
         let input = hex::decode(
             include_str!("../../tests/vectors/iso_18013_5_annex_d_mdl.hex")
                 .split_whitespace()
@@ -695,20 +691,20 @@ mod tests {
         let mut response = crate::parser::parse_borrowed(&input).unwrap();
         let auth = &mut response.documents[0].issuer_signed.issuer_auth;
         let original = auth.cose_sign1.payload.unwrap();
-        assert!(auth.parsed_mso().is_ok());
+        assert!(auth.mso().is_ok());
 
         // A shorter slice has the same address, but is not the validated item.
         auth.cose_sign1.payload = Some(&original[..original.len() - 1]);
-        assert!(auth.parsed_mso().is_err());
+        assert!(auth.mso().is_err());
         auth.cose_sign1.payload = None;
-        assert!(auth.parsed_mso().is_err());
+        assert!(auth.mso().is_err());
         auth.cose_sign1.payload = Some(&[0xd8, 0x18, 0x41, 0xff]);
-        assert!(auth.parsed_mso().is_err());
+        assert!(auth.mso().is_err());
 
         // Equal contents in a new buffer must produce references to that buffer.
         let replacement = original.to_vec();
         auth.cose_sign1.payload = Some(&replacement);
-        let mso = auth.parsed_mso().unwrap();
+        let mso = auth.mso().unwrap();
         let start = replacement.as_ptr() as usize;
         let doc_type = mso.doc_type.as_ptr() as usize;
         assert!(doc_type >= start && doc_type + mso.doc_type.len() <= start + replacement.len());

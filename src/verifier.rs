@@ -298,7 +298,7 @@ fn authenticate_issuer<'a>(auth: &IssuerAuthRef<'a>) -> Result<IssuerEvidence<'a
     )? {
         return Err(MdocError::Signature("issuerAuth signature mismatch".into()));
     }
-    let mso = auth.parsed_mso()?;
+    let mso = auth.mso()?;
     let interval = certificate_interval(&leaf)?;
     Ok((mso, certificates, interval))
 }
