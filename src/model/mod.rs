@@ -1,11 +1,13 @@
 //! ISO 18013-5 data model types.
 
+pub mod borrowed;
 pub mod device_response;
 pub mod document;
 pub mod issuer_auth;
 pub mod issuer_signed_item;
 pub mod types;
 
+pub use borrowed::*;
 pub use device_response::{DeviceResponse, DeviceResponseStatus};
 pub use document::{DeviceSigned, DeviceSignedDocument, IssuerSigned, IssuerSignedDocument};
 pub use issuer_auth::IssuerAuth;

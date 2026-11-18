@@ -194,7 +194,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let issuer_certificate = x509_cert::Certificate::from_der(new_auth.certificate_der()?)?;
     let issuer_public_key = candidate::cose::key::cose_key_from_spki(
-        &issuer_certificate.tbs_certificate.subject_public_key_info,
+        issuer_certificate
+            .tbs_certificate()
+            .subject_public_key_info(),
     )?;
     let issuer_tbs = old_auth.cose_sign1.tbs_data(&[]);
     assert_eq!(issuer_tbs, new_auth.cose_sign1.tbs_data(&[]));

@@ -12,7 +12,7 @@ use std::borrow::Cow;
 
 use sha2::{Digest, Sha256};
 
-use crate::cbor::raw;
+use crate::cbor::raw::{self, cbor_head};
 use crate::error::MdocError;
 
 const REDIRECT_PREFIX: &[u8] = b"\x83\xf6\xf6\x82\x71OpenID4VPHandover\x58\x20";
@@ -243,7 +243,7 @@ fn validate_transcript_structure(bytes: &[u8]) -> Result<(), MdocError> {
 }
 
 fn hash_text(digest: &mut Sha256, value: &str) {
-    let (head, len) = cbor_head(3, value.len());
+    let (head, len) = cbor_head(3, value.len() as u64);
     digest.update(&head[..len]);
     digest.update(value.as_bytes());
 }
@@ -305,37 +305,89 @@ pub fn build_device_authentication(
             }
         }
     }
-    Ok(build_device_authentication_validated(
-        transcript,
-        doc_type,
-        device_name_spaces_bytes,
-    ))
+    Ok(
+        DeviceAuthentication::new(transcript, doc_type, device_name_spaces_bytes)
+            .parts()
+            .concat(),
+    )
 }
 
-/// Internal fast path for a namespace map already validated by the parser.
-/// The full original Tag24 encoding must be passed through unchanged.
-pub(crate) fn build_device_authentication_validated(
-    transcript: &SessionTranscript<'_>,
-    doc_type: &str,
-    device_name_spaces_bytes: &[u8],
-) -> Vec<u8> {
-    let (doc_type_head, doc_type_head_len) = cbor_head(3, doc_type.len());
-    let inner_len = DEVICE_AUTHENTICATION_PREFIX.len()
-        + transcript.as_bytes().len()
-        + doc_type_head_len
-        + doc_type.len()
-        + device_name_spaces_bytes.len();
-    let (outer_head, outer_head_len) = cbor_head(2, inner_len);
-    let capacity = inner_len + TAG24.len() + outer_head_len;
-    let mut bytes = Vec::with_capacity(capacity);
-    bytes.extend_from_slice(TAG24);
-    bytes.extend_from_slice(&outer_head[..outer_head_len]);
-    bytes.extend_from_slice(DEVICE_AUTHENTICATION_PREFIX);
-    bytes.extend_from_slice(transcript.as_bytes());
-    bytes.extend_from_slice(&doc_type_head[..doc_type_head_len]);
-    bytes.extend_from_slice(doc_type.as_bytes());
-    bytes.extend_from_slice(device_name_spaces_bytes);
-    bytes
+/// Framing of validated DeviceAuthenticationBytes. Payload data remains borrowed.
+pub(crate) struct DeviceAuthentication<'a> {
+    transcript: &'a [u8],
+    doc_type: &'a str,
+    namespaces: &'a [u8],
+    doc_type_head: ([u8; 9], usize),
+    outer_head: ([u8; 9], usize),
+    encoded_len: usize,
+}
+
+impl<'a> DeviceAuthentication<'a> {
+    pub(crate) fn new(
+        transcript: &'a SessionTranscript<'_>,
+        doc_type: &'a str,
+        namespaces: &'a [u8],
+    ) -> Self {
+        let doc_type_head = cbor_head(3, doc_type.len() as u64);
+        let inner_len = DEVICE_AUTHENTICATION_PREFIX.len()
+            + transcript.as_bytes().len()
+            + doc_type_head.1
+            + doc_type.len()
+            + namespaces.len();
+        let outer_head = cbor_head(2, inner_len as u64);
+        Self {
+            transcript: transcript.as_bytes(),
+            doc_type,
+            namespaces,
+            doc_type_head,
+            outer_head,
+            encoded_len: inner_len + TAG24.len() + outer_head.1,
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.encoded_len
+    }
+
+    pub(crate) fn parts(&self) -> [&[u8]; 7] {
+        [
+            TAG24,
+            &self.outer_head.0[..self.outer_head.1],
+            DEVICE_AUTHENTICATION_PREFIX,
+            self.transcript,
+            &self.doc_type_head.0[..self.doc_type_head.1],
+            self.doc_type.as_bytes(),
+            self.namespaces,
+        ]
+    }
+
+    /// Append this seven-part payload to the five COSE framing parts.
+    pub(crate) fn authentication_parts<'b>(&'b self, prefix: [&'b [u8]; 5]) -> [&'b [u8]; 12] {
+        let [context, protected_head, protected, aad, payload_head] = prefix;
+        let [
+            tag,
+            inner_head,
+            device,
+            transcript,
+            type_head,
+            doc_type,
+            namespaces,
+        ] = self.parts();
+        [
+            context,
+            protected_head,
+            protected,
+            aad,
+            payload_head,
+            tag,
+            inner_head,
+            device,
+            transcript,
+            type_head,
+            doc_type,
+            namespaces,
+        ]
+    }
 }
 
 /// Derive the 32-byte `EMacKey` from an ECDH shared secret.
@@ -363,7 +415,7 @@ pub fn derive_ephemeral_mac_key_for(
             "ECDH shared secret must not be empty".into(),
         ));
     }
-    let (head, len) = cbor_head(2, transcript.as_bytes().len());
+    let (head, len) = cbor_head(2, transcript.as_bytes().len() as u64);
     let mut salt = Sha256::new();
     salt.update(TAG24);
     salt.update(&head[..len]);
@@ -374,21 +426,4 @@ pub fn derive_ephemeral_mac_key_for(
     hkdf.expand(b"EMacKey", &mut key)
         .map_err(|error| MdocError::Session(format!("HKDF expand: {error}")))?;
     Ok(key)
-}
-
-// Only CBOR length framing is needed here. Cryptographic operations remain in
-// RustCrypto. No value tree or temporary HandoverInfo buffer is allocated.
-fn cbor_head(major: u8, value: usize) -> ([u8; 9], usize) {
-    let value = value as u64;
-    let mut bytes = [0; 9];
-    let (additional, width) = match value {
-        0..=23 => (value as u8, 0),
-        24..=0xff => (24, 1),
-        0x100..=0xffff => (25, 2),
-        0x1_0000..=0xffff_ffff => (26, 4),
-        _ => (27, 8),
-    };
-    bytes[0] = (major << 5) | additional;
-    bytes[1..1 + width].copy_from_slice(&value.to_be_bytes()[8 - width..]);
-    (bytes, width + 1)
 }

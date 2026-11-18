@@ -10,7 +10,7 @@ is required. For a Git dependency, pin the full commit revision you have tested.
 ## Presentation verification
 
 ```rust,ignore
-use nazo_mdoc::{verify_presentation, VerificationOptions};
+use nazo_mdoc::{verify_presentation_borrowed, VerificationOptions};
 use nazo_mdoc::session::{RedirectHandover, SessionTranscript};
 
 let transcript = SessionTranscript::validate_redirect(raw_transcript, RedirectHandover {
@@ -19,7 +19,7 @@ let transcript = SessionTranscript::validate_redirect(raw_transcript, RedirectHa
     jwk_thumbprint: response_encryption_key_thumbprint,
     response_uri,
 })?;
-let documents = verify_presentation(response, &transcript, &VerificationOptions {
+let documents = verify_presentation_borrowed(response, &transcript, &VerificationOptions {
     now: verification_time,
     max_documents: 1,
 })?;
@@ -28,10 +28,10 @@ for document in documents {
 }
 ```
 
-`verify_presentation` authenticates issuer and holder signatures, disclosure
+`verify_presentation_borrowed` authenticates issuer and holder signatures, disclosure
 digests, document type, device-key authorizations and MSO validity. It returns
-`PendingTrustDocument`, containing the authenticated document, MSO and certificate
-chain. The application completes:
+`PendingTrustDocumentRef`, whose document, MSO and certificate bytes borrow the
+response buffer. Keep that buffer alive while using the evidence. The application completes:
 
 - X.509 path validation against its trusted issuers, including the document
   signer profile and certificate revocation.
@@ -46,6 +46,31 @@ other transcript profiles; request binding remains the caller's responsibility.
 The generic parser allows up to 16 documents. `VerificationOptions` sets the
 presentation limit; HAIP callers use 1. A verification error rejects the whole
 response.
+
+## Borrowed data
+
+`parse_borrowed` and `parser::parse_issued_borrowed` retain text, byte strings,
+claims, signed envelopes and COSE fields as views of the input. `CborValueRef`
+reads scalar values and traverses arrays, maps and tags without constructing an
+owned value tree. `MsoRef` borrows digests, device-key parameters and status data.
+
+`verify_presentation_borrowed` and `verify_issued_borrowed` preserve these views
+through authentication. Their `into_parts` methods move the metadata indexes;
+`into_owned` creates independent storage when the input buffer must be released.
+The existing `parse`, `verify_presentation` and `verify_issued` APIs perform this
+owned conversion after the same parsing or verification path.
+
+With `issue`, the borrowed encoders write directly from those views into the
+output buffer. Holder signing can use
+`response_builder::prepare_device_authentication_borrowed`: select the issuer
+items in a borrowed document, prepare the signing input, and pass the external
+signature to `finish` to obtain a DeviceResponse. Issuer attributes and certificate
+bytes remain borrowed until they are written into that response.
+
+ECDSA and HMAC verification consume message fragments directly. Strict Ed25519
+verification uses a contiguous message, and X.509 decoding uses the upstream
+certificate model. Namespace and digest indexes store references in collections.
+New wire output and external signing inputs have their own buffers.
 
 ## Issuance
 
@@ -82,7 +107,7 @@ the application manages their allocation and publication.
 | MSO digests | SHA-256, SHA-384 and SHA-512 with matching digest lengths |
 | Versions | Emit `1.0`; receive numeric minor versions of major version 1 |
 | Session binding | OpenID4VP 1.0 Final Redirect and DC API handovers |
-| Device authentication | DeviceSignature in `verify_presentation`; separate DeviceMAC and HKDF primitives for caller-established sessions |
+| Device authentication | DeviceSignature in the presentation verifier; separate DeviceMAC and HKDF primitives for caller-established sessions |
 | Authenticated bytes | Preserve received Tag 24 envelopes, protected headers and payloads |
 | CBOR input | Definite lengths, shortest integer/length encodings, unique integer/text/byte-string map keys, valid UTF-8 and preserved tags; false, true, null and IEEE floats |
 | CBOR limits | 1 MiB per envelope, depth 32, 65,536 items and 4,096 entries per collection; configurable through `parse_with_limits` |
@@ -129,7 +154,8 @@ Tests include ISO Annex D, official Final handover examples, independent
 signature/MAC vectors, malformed-input tests and property tests. The
 [core benchmark](benchmarks/core/README.md) records CPU, elapsed time, allocation
 stacks and linked consumer sizes. See the
-[merge review](docs/review-2026-11-18.md) and
+[borrowed-data and dependency review](docs/borrowed-dependencies-2026-11-18.md),
+[preceding merge review](docs/review-2026-11-18.md) and
 [performance report](docs/performance-2026-11-18-final.md) for results and raw evidence.
 Historical measurements are in the
 [2026-11-17 validation record](docs/validation-2026-11-17.md).

@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@9522411a9bce8484da960823fc2f46e52f981f71
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all --check
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@9522411a9bce8484da960823fc2f46e52f981f71
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff
         with:
           targets: wasm32-unknown-unknown, wasm32-wasip2
       - run: cargo build --locked --no-default-features --target wasm32-unknown-unknown
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@9522411a9bce8484da960823fc2f46e52f981f71
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff
       - run: cargo install cargo-audit --version 0.23.0 --locked --no-default-features
       - run: cargo audit --deny warnings
   fuzz:

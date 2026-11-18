@@ -1,7 +1,9 @@
 //! ISO mdoc issuance, parsing and signature verification.
 //!
-//! `parse` decodes untrusted wire data. `verify_presentation` authenticates
-//! issuer/holder signatures and disclosed claims, returning `PendingTrustDocument`.
+//! `parse_borrowed` reads untrusted wire data without copying its values.
+//! `verify_presentation_borrowed` authenticates issuer/holder signatures and
+//! disclosed claims, returning evidence that continues to borrow the input.
+//! The corresponding owned APIs materialize independent storage explicitly.
 //! The application completes issuer X.509 trust, certificate revocation, MSO
 //! status, request freshness and authorization. The `issue` feature prepares
 //! immutable signing inputs and verifies externally returned signatures.
@@ -28,7 +30,11 @@ pub mod time;
 pub mod verifier;
 
 pub use error::MdocError;
-pub use model::{DeviceResponse, DeviceResponseStatus};
-pub use parser::{parse, parse_hex};
+pub use model::{CborValueRef, DeviceResponse, DeviceResponseRef, DeviceResponseStatus};
+pub use parser::{parse, parse_borrowed, parse_hex};
 pub use time::Timestamp;
-pub use verifier::{PendingTrustDocument, VerificationOptions, verify_presentation};
+pub use verifier::{
+    PendingIssuerTrustDocument, PendingIssuerTrustDocumentRef, PendingTrustDocument,
+    PendingTrustDocumentRef, VerificationOptions, verify_issued, verify_issued_borrowed,
+    verify_presentation, verify_presentation_borrowed,
+};

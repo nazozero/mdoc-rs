@@ -42,7 +42,7 @@ fn assert_issuer_signature(document: &IssuerSignedDocument) {
     let auth = &document.issuer_signed.issuer_auth;
     let leaf = x509_cert::Certificate::from_der(auth.certificate_der().unwrap()).unwrap();
     let key =
-        nazo_mdoc::cose::key::cose_key_from_spki(&leaf.tbs_certificate.subject_public_key_info)
+        nazo_mdoc::cose::key::cose_key_from_spki(leaf.tbs_certificate().subject_public_key_info())
             .unwrap();
     let sign1 = &auth.cose_sign1;
     assert!(
@@ -106,8 +106,8 @@ fn authenticated_mso_signed_time_is_contained_by_inclusive_leaf_certificate_boun
         Timestamp::from_unix_seconds(value.to_unix_duration().as_secs().try_into().unwrap())
             .unwrap()
     };
-    let before = convert(leaf.tbs_certificate.validity.not_before);
-    let after = convert(leaf.tbs_certificate.validity.not_after);
+    let before = convert(leaf.tbs_certificate().validity().not_before);
+    let after = convert(leaf.tbs_certificate().validity().not_after);
     for (signed, accepted) in [
         (offset_seconds(before, -1), false),
         (before, true),
@@ -139,7 +139,7 @@ fn replace_public_fixture_certificate_dates(
 ) {
     // A fresh, genuinely self-signed public test certificate keeps certificate
     // corruption from being the explanation. It still is not a trust anchor.
-    let mut leaf =
+    let original =
         x509_cert::Certificate::from_der(&hex::decode(GENUINE_CERT_HEX).unwrap()).unwrap();
     let to_time = |value: Timestamp| {
         x509_cert::time::Time::UtcTime(
@@ -149,15 +149,29 @@ fn replace_public_fixture_certificate_dates(
             .unwrap(),
         )
     };
-    leaf.tbs_certificate.validity.not_before = to_time(not_before);
-    leaf.tbs_certificate.validity.not_after = to_time(not_after);
-    let tbs = leaf.tbs_certificate.to_der().unwrap();
-    let signature: p256::ecdsa::Signature = issuer_key().sign(&tbs);
+    use x509_cert::builder::{Builder, CertificateBuilder, profile::cabf::Root};
+    let profile = Root::new(
+        false,
+        "CN=Public test fixture,O=nazo-mdoc tests,C=US"
+            .parse()
+            .unwrap(),
+    )
+    .unwrap();
+    let leaf = CertificateBuilder::new(
+        profile,
+        1u32.into(),
+        x509_cert::time::Validity::new(to_time(not_before), to_time(not_after)),
+        original.tbs_certificate().subject_public_key_info().clone(),
+    )
+    .unwrap()
+    .build::<_, p256::ecdsa::DerSignature>(&issuer_key())
+    .unwrap();
+    let tbs = leaf.tbs_certificate().to_der().unwrap();
+    let signature = p256::ecdsa::Signature::from_der(leaf.signature().as_bytes().unwrap()).unwrap();
     issuer_key()
         .verifying_key()
         .verify(&tbs, &signature)
         .unwrap();
-    leaf.signature = der::asn1::BitString::from_bytes(signature.to_der().as_bytes()).unwrap();
     let headers = &mut document
         .issuer_signed
         .issuer_auth

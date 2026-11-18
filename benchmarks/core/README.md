@@ -3,7 +3,10 @@
 The baseline is `070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc`. The candidate is the
 current checkout. Each executable links one revision with the `issue` feature.
 Separate executables preserve each revision's dependency features. The lockfile
-pins the baseline's dependency versions for both builds.
+records the resolved dependency graph, including separate versions where the
+historical library and current checkout require different dependency types.
+The historical source revision stays fixed when the candidate's dependencies
+are upgraded.
 
 ## Build and preflight
 
@@ -73,6 +76,64 @@ builder, OS entropy, preparation, signing, and signature confirmation.
 case generates fresh salts and digest IDs normally. Issuance samples therefore
 compare the same logical claims and validation rules with fresh wire bytes.
 
+### Compare owned and borrowed APIs in the same executable
+
+The candidate includes three additional cases that return models borrowing the
+input. Use the candidate executable for both runner labels and select the
+operations with `--baseline-case` and `--candidate-case`. This compares the two
+API contracts under the same library revision, dependency versions, compiler
+and executable, separately from a comparison with the historical revision.
+
+| Owned case (`--baseline-case`) | Borrowed case (`--candidate-case`) | Input and measured scope |
+| --- | --- | --- |
+| `response_parse` | `response_parse_borrowed` | Complete Annex D DeviceResponse parsing |
+| `mso_parse` | `mso_parse_borrowed` | Complete Tag 24 MSO payload validation and schema parsing |
+| `full_protocol_verify` | `full_protocol_verify_borrowed` | Parsing and issuer/holder authentication of the saved Final presentation |
+
+For example, compare the two DeviceResponse parsing APIs:
+
+```sh
+python3 benchmarks/core/run.py \
+  --baseline /tmp/mdoc-candidate/release/mdoc-core-benchmark \
+  --candidate /tmp/mdoc-candidate/release/mdoc-core-benchmark \
+  --baseline-case response_parse \
+  --candidate-case response_parse_borrowed \
+  --fixture /tmp/mdoc-input --out /tmp/mdoc-borrowed-parse \
+  --rounds 4 --samples 1000 --warmup 100
+```
+
+Use the other case pairs with separate output directories. Both case options
+are required together and cannot be combined with `--case`. These runs compare
+different operations, so `--unchanged-control` does not apply; that option
+requires the same operation as well as the same executable. The `baseline` and
+`candidate` output labels identify the owned and borrowed operations in this
+experiment; both metadata files identify the candidate build.
+
+All three pairs start from the same prepared input buffers. No parsed borrowed
+model is prepared outside the measured operation. The standalone MSO cases
+borrow the same payload buffer extracted during fixture setup; they exclude
+DeviceResponse parsing and both validate the complete payload on each call.
+The full verification cases start from the saved response bytes and include
+parsing and authentication on every invocation. Input loading, fixture setup
+and preflight are outside timing and allocation counting. Result destruction
+is included for both API contracts. Borrowed models still allocate collection
+metadata; allocation measurements do not imply that an operation copies no
+bytes or allocates nothing.
+
+### Certificate conversion across dependency versions
+
+`certificate_key_convert` is available only in the candidate build. The
+historical revision exposes older SPKI/DER dependency types, which cannot be
+passed interchangeably with the upgraded certificate types used by this
+harness. Baseline preflight instead passes the Annex D certificate's original
+P-256 point through the stable SEC1 conversion API. The baseline remains fixed
+at `070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc`; it is not patched to accept the
+new SPKI type. Do not calculate a cross-revision delta for this candidate-only
+case. Historical archived runs that contain a baseline conversion measurement
+used their recorded dependency graph and harness.
+
+### Recorded outputs
+
 The outputs are:
 
 - `runs.json`: command, execution order, exit status, and binary hash for every run.
@@ -90,22 +151,27 @@ capacity of each reallocation. They describe allocator traffic. Executable
 sizes include fixtures, instrumentation, and all benchmark cases; measure a
 separate minimal consumer when reporting library size.
 
-The [final 2026-11-18 report](../../docs/performance-2026-11-18-final.md) links the measured
-revisions, per-round quantiles and archived raw evidence.
+The [borrowed APIs and dependency upgrade report](../../docs/borrowed-dependencies-2026-11-18.md)
+documents the current 2026-11-18 round. The earlier
+[performance report](../../docs/performance-2026-11-18-final.md) retains the
+historical revisions, per-round quantiles and archived raw evidence for that
+measurement round.
 
 ## Cases
 
 | Case | Measured operation |
 | --- | --- |
 | `measurement_control` | Clock and harness floor |
-| `response_parse` | Annex D DeviceResponse parsing |
-| `mso_parse` | Tag 24 MSO decoding and model construction |
+| `response_parse` | Annex D DeviceResponse parsing into owned models |
+| `response_parse_borrowed` | Annex D parsing with borrowed values; candidate only |
+| `mso_parse` | Tag 24 MSO decoding and owned model construction |
+| `mso_parse_borrowed` | Tag 24 MSO validation and borrowed model construction; candidate only |
 | `mso_decode` | Bounded inner MSO decoding with preserved tags |
 | `canonical_mso_encode` | Deterministic MSO encoding |
 | `disclosure_verify` | Issuer item digests and disclosure checks |
 | `coset_sig_structure_control` | Unchanged coset Sig_structure constructor |
 | `certificate_decode` | Leaf DER decoding |
-| `certificate_key_convert` | SPKI to COSE key conversion |
+| `certificate_key_convert` | SPKI to COSE key conversion; candidate only |
 | `issuer_es256_verify` | Issuer key checks and signature verification |
 | `holder_es256_verify` | Holder authentication |
 | `issuance_prepare` | Two-attribute issuance preparation |
@@ -113,5 +179,6 @@ revisions, per-round quantiles and archived raw evidence.
 | `issuance_finish` | External signature confirmation and document completion |
 | `issuance_complete` | Complete two-attribute issuance |
 | `issuer_signed_encode` | IssuerSigned wire encoding |
-| `full_protocol_verify` | Final presentation authentication |
+| `full_protocol_verify` | Final presentation authentication returning owned evidence |
+| `full_protocol_verify_borrowed` | Final presentation authentication returning borrowed evidence; candidate only |
 | `redirect_transcript_validate` | Borrowed transcript/request binding |

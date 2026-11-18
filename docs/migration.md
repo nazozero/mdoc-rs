@@ -31,6 +31,48 @@ Encoded fields are authoritative. Changing a decoded claim requires rebuilding
 and signing the credential. `verify_issued` and `verify_presentation` accept wire
 bytes and construct authenticated projections from them.
 
+## Borrowed APIs and owned storage
+
+Keep the input buffer alive while using these views:
+
+| Operation | Borrowed entry point | Result |
+| --- | --- | --- |
+| Parse a response or issued credential | `parser::parse_borrowed`, `parser::parse_issued_borrowed` | `DeviceResponseRef`, `IssuerSignedRef`; untrusted until authenticated |
+| Authenticate issuer and holder | `verify_presentation_borrowed` | `Vec<PendingTrustDocumentRef>` |
+| Authenticate an issued credential | `verify_issued_borrowed` | `PendingIssuerTrustDocumentRef` |
+| Encode existing borrowed fields (`issue`) | `encoder::encode_device_response_borrowed`, `encoder::encode_issuer_signed_borrowed` | Owned wire bytes, preserving original signed fields |
+| Prepare an external holder signature (`issue`) | `response_builder::prepare_device_authentication_borrowed` | `PreparedDeviceAuthenticationRef`; `finish(&signature)` returns DeviceResponse bytes |
+
+`CborValueRef` exposes typed values and their original encoding without first
+building a `ciborium::Value` tree. Use its `to_owned()` for one owned value, or
+the model/pending result's `into_owned()` for independent storage. Cloning a
+borrowed model still borrows its input. Pending results also offer `into_parts()`
+to move out the document, MSO and certificate references for selective disclosure.
+
+`parse`, `parse_issued`, `verify_issued` and `verify_presentation` return owned
+results through the same borrowed core. Custom parsing limits do not raise the
+default MSO limits of holder preparation. Borrowed holder preparation retains one
+contiguous `signing_input()` for the external signer and writes the completed
+response directly after checking the signature.
+
+## Cryptographic dependency types
+
+This revision uses the versions in [Cargo.toml](../Cargo.toml) and
+[Cargo.lock](../Cargo.lock). Consumers passing cryptographic types across API
+boundaries must align their dependencies:
+
+| Type family | Current versions | Consumer adjustment |
+| --- | --- | --- |
+| DER, OIDs and certificates | `der 0.8.3`, `const-oid 0.10.3`, `x509-cert 0.3.0`, `spki 0.8.1` | `cose_key_from_spki` accepts the SPKI type reexported by x509-cert 0.3. Certificate fields now use accessors such as `tbs_certificate().subject_public_key_info()`. Use the upstream certificate builder for construction. |
+| ECDSA and signature traits | `p256`, `p384`, `p521` 0.14.0; `signature 3.0.0` | Use the matching `Signer`/`Verifier` traits and return fixed-width raw ECDSA signatures to `finish`. |
+| Ed25519 | `ed25519-dalek 3.0.0` | The old `std` feature is removed. Verification retains `verify_strict`; multipart Ed25519 input is joined because the upstream multipart API does not provide the same strict checks. |
+| Hashes, HMAC and HKDF | `sha2 0.11.1`, `hmac 0.13.0`, `hkdf 0.13.0` | Use the current digest types together. HMAC construction needs `hmac::KeyInit` in scope alongside `Mac`. |
+
+Types from older DER/SPKI or signature crate majors are distinct Rust types;
+unchanged DER or COSE wire formats do not make them interchangeable. COSE model
+arguments remain `coset 0.4.2` types. The library's certificate-builder and P-256
+PKCS#8 features are enabled only for its tests.
+
 ## Verification and trust
 
 `PendingTrustDocument` contains verified issuer and holder signatures, disclosure

@@ -1,11 +1,13 @@
 //! IssuerAuth — COSE_Sign1 with strict MSO parsing and untrusted certificates.
 
-use super::types::{
-    DeviceKeyInfo, DigestAlgorithm, KeyAuthorizations, Mso, MsoStatus, StatusListInfo, ValidityInfo,
+use super::{
+    CborValueRef, CoseKeyRef, DeviceKeyInfoRef, DigestAlgorithm, KeyAuthorizationsRef, Mso, MsoRef,
+    MsoStatusRef, StatusListInfoRef, ValidityInfo,
 };
+use crate::cbor::raw::{Item, Map};
 use crate::error::MdocError;
 use ciborium::Value;
-use coset::{AsCborValue, CoseKey, CoseSign1};
+use coset::CoseSign1;
 use std::collections::HashMap;
 
 /// Issuer authentication (COSE_Sign1 containing the MSO).
@@ -31,10 +33,7 @@ impl IssuerAuth {
             .payload
             .as_deref()
             .ok_or_else(|| mso_error("missing COSE_Sign1 payload"))?;
-        let mso = crate::cbor::raw::Item::parse(payload)?
-            .embedded()?
-            .value()?;
-        parse_mso_value(mso)
+        MsoRef::parse(payload)?.into_owned()
     }
 
     /// Borrow the leaf certificate's DER from the unprotected x5chain header.
@@ -125,40 +124,24 @@ fn mso_error(message: impl Into<String>) -> MdocError {
     MdocError::Mso(message.into())
 }
 
-fn as_map<'a>(value: &'a Value, field: &str) -> Result<&'a [(Value, Value)], MdocError> {
-    value
-        .as_map()
-        .map(Vec::as_slice)
-        .ok_or_else(|| mso_error(format!("{field} is not a CBOR map")))
+fn required<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
+    value.ok_or_else(|| mso_error(format!("missing {field}")))
 }
 
-fn as_text<'a>(value: &'a Value, field: &str) -> Result<&'a str, MdocError> {
+fn mso_map<'a>(value: Item<'a>, field: &str) -> Result<Map<'a>, MdocError> {
+    value
+        .map()
+        .map_err(|_| mso_error(format!("{field} is not a CBOR map")))
+}
+
+fn mso_text<'a>(value: Item<'a>, field: &str) -> Result<&'a str, MdocError> {
     value
         .as_text()
         .ok_or_else(|| mso_error(format!("{field} is not text")))
 }
 
-fn into_map(value: Value, field: &str) -> Result<Vec<(Value, Value)>, MdocError> {
-    match value {
-        Value::Map(entries) => Ok(entries),
-        _ => Err(mso_error(format!("{field} is not a CBOR map"))),
-    }
-}
-
-fn into_text(value: Value, field: &str) -> Result<String, MdocError> {
-    match value {
-        Value::Text(text) => Ok(text),
-        _ => Err(mso_error(format!("{field} is not text"))),
-    }
-}
-
-fn required<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
-    value.ok_or_else(|| mso_error(format!("missing {field}")))
-}
-
-/// Project an MSO whose complete encoding has passed raw CBOR validation,
-/// establishing unique map keys including extension values.
-fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
+/// Project one validated MSO while retaining references to its wire bytes.
+pub(crate) fn parse_mso_ref(value: Item<'_>) -> Result<MsoRef<'_>, MdocError> {
     let mut version = None;
     let mut digest_algorithm = None;
     let mut doc_type = None;
@@ -167,34 +150,34 @@ fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     let mut device_key_info = None;
     let mut status = None;
     let mut additional_fields = HashMap::new();
-
-    for (key, value) in into_map(value, "MSO")? {
-        let key = into_text(key, "MSO key")?;
-        match key.as_str() {
-            "version" => version = Some(into_text(value, &key)?),
+    for entry in mso_map(value, "MSO")? {
+        let (key, value) = entry?;
+        let key = mso_text(key, "MSO key")?;
+        match key {
+            "version" => version = Some(mso_text(value, key)?),
             "digestAlgorithm" => {
-                let name = into_text(value, &key)?;
-                let algorithm = DigestAlgorithm::from_str_name(&name)
-                    .ok_or(MdocError::UnsupportedAlgorithm(name))?;
-                digest_algorithm = Some(algorithm);
+                let name = mso_text(value, key)?;
+                digest_algorithm = Some(
+                    DigestAlgorithm::from_str_name(name)
+                        .ok_or_else(|| MdocError::UnsupportedAlgorithm(name.to_owned()))?,
+                );
             }
-            "docType" => doc_type = Some(into_text(value, &key)?),
+            "docType" => doc_type = Some(mso_text(value, key)?),
             "validityInfo" => validity_info = Some(parse_validity_info(value)?),
             "valueDigests" => value_digests = Some(parse_value_digests(value)?),
             "deviceKeyInfo" => device_key_info = Some(parse_device_key_info(value)?),
-            "status" => status = Some(parse_status(value)?),
+            "status" => status = Some(parse_status_ref(value)?),
             _ => {
-                additional_fields.insert(key, value);
+                additional_fields.insert(key, CborValueRef::from_item(value));
             }
         }
     }
-
     let version = required(version, "version")?;
-    if !super::types::supports_version(&version) {
+    if !super::types::supports_version(version) {
         return Err(mso_error("unsupported MSO version"));
     }
     let digest_algorithm = required(digest_algorithm, "digestAlgorithm")?;
-    let value_digests: HashMap<String, HashMap<u32, Vec<u8>>> =
+    let value_digests: HashMap<&str, HashMap<u32, &[u8]>> =
         required(value_digests, "valueDigests")?;
     if value_digests
         .values()
@@ -207,7 +190,7 @@ fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     if doc_type.is_empty() {
         return Err(mso_error("docType is empty"));
     }
-    Ok(Mso {
+    Ok(MsoRef {
         version,
         digest_algorithm,
         doc_type,
@@ -219,28 +202,30 @@ fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     })
 }
 
-fn parse_value_digests(value: Value) -> Result<HashMap<String, HashMap<u32, Vec<u8>>>, MdocError> {
-    let namespaces = into_map(value, "valueDigests")?;
-    if namespaces.is_empty() {
+fn parse_value_digests(value: Item<'_>) -> Result<HashMap<&str, HashMap<u32, &[u8]>>, MdocError> {
+    let namespaces = mso_map(value, "valueDigests")?;
+    if namespaces.len() == 0 {
         return Err(mso_error("valueDigests must not be empty"));
     }
     let mut result = HashMap::with_capacity(namespaces.len());
-    for (namespace, values) in namespaces {
-        let namespace = into_text(namespace, "valueDigests namespace")?;
-        let values = into_map(values, "namespace digests")?;
-        if values.is_empty() {
+    for entry in namespaces {
+        let (namespace, values) = entry?;
+        let namespace = mso_text(namespace, "valueDigests namespace")?;
+        let values = mso_map(values, "namespace digests")?;
+        if values.len() == 0 {
             return Err(mso_error("namespace digests must not be empty"));
         }
         let mut digests = HashMap::with_capacity(values.len());
-        for (id, digest) in values {
+        for entry in values {
+            let (id, digest) = entry?;
             let id = id
                 .as_integer()
                 .and_then(|id| u32::try_from(id).ok())
                 .filter(|id| *id < 1 << 31)
                 .ok_or_else(|| mso_error("digestID must be an unsigned integer below 2^31"))?;
-            let Value::Bytes(digest) = digest else {
-                return Err(mso_error("digest value is not bytes"));
-            };
+            let digest = digest
+                .as_bytes()
+                .ok_or_else(|| mso_error("digest value is not bytes"))?;
             digests.insert(id, digest);
         }
         result.insert(namespace, digests);
@@ -248,60 +233,60 @@ fn parse_value_digests(value: Value) -> Result<HashMap<String, HashMap<u32, Vec<
     Ok(result)
 }
 
-// The MSO decoder validates raw CBOR before this projection. Issuance validates
-// the resulting encoding before returning a prepared operation.
-pub(crate) fn parse_status(value: Value) -> Result<MsoStatus, MdocError> {
-    let mechanisms = as_map(&value, "status")?;
-    if mechanisms.is_empty() {
+pub(crate) fn parse_status_ref(value: Item<'_>) -> Result<MsoStatusRef<'_>, MdocError> {
+    let mechanisms = mso_map(value, "status")?;
+    if mechanisms.len() == 0 {
         return Err(mso_error("status must contain at least one mechanism"));
     }
     let mut status_list = None;
-    for (mechanism, details) in mechanisms {
-        if as_text(mechanism, "status mechanism")? == "status_list" {
+    for entry in mechanisms {
+        let (mechanism, details) = entry?;
+        if mso_text(mechanism, "status mechanism")? == "status_list" {
             let mut idx = None;
             let mut uri = None;
-            for (key, value) in as_map(details, "status.status_list")? {
-                let key = as_text(key, "status_list key")?;
-                match key {
+            for entry in mso_map(details, "status.status_list")? {
+                let (key, value) = entry?;
+                match mso_text(key, "status_list key")? {
                     "idx" => {
-                        let index = value
-                            .as_integer()
-                            .and_then(|value| u64::try_from(value).ok())
-                            .ok_or_else(|| {
-                                mso_error("status.status_list.idx must be an unsigned integer")
-                            })?;
-                        idx = Some(index);
+                        idx = Some(
+                            value
+                                .as_integer()
+                                .and_then(|value| u64::try_from(value).ok())
+                                .ok_or_else(|| {
+                                    mso_error("status.status_list.idx must be an unsigned integer")
+                                })?,
+                        );
                     }
                     "uri" => {
-                        let value = as_text(value, "status.status_list.uri")?;
+                        let value = mso_text(value, "status.status_list.uri")?;
                         iri_string::types::UriStr::new(value).map_err(|_| {
                             mso_error("status.status_list.uri must be an RFC 3986 URI")
                         })?;
-                        uri = Some(value.to_owned());
+                        uri = Some(value);
                     }
-                    _ => {} // Retained in `raw`; application policy decides.
+                    _ => {}
                 }
             }
-            status_list = Some(StatusListInfo {
+            status_list = Some(StatusListInfoRef {
                 idx: required(idx, "status.status_list.idx")?,
                 uri: required(uri, "status.status_list.uri")?,
             });
         }
     }
-    Ok(MsoStatus {
+    Ok(MsoStatusRef {
         status_list,
-        raw: value,
+        raw: CborValueRef::from_item(value),
     })
 }
 
-fn parse_validity_info(value: Value) -> Result<ValidityInfo, MdocError> {
+fn parse_validity_info(value: Item<'_>) -> Result<ValidityInfo, MdocError> {
     let mut signed = None;
     let mut valid_from = None;
     let mut valid_until = None;
     let mut expected_update = None;
-    for (key, value) in into_map(value, "validityInfo")? {
-        let key = into_text(key, "validityInfo key")?;
-        let slot = match key.as_str() {
+    for entry in mso_map(value, "validityInfo")? {
+        let (key, value) = entry?;
+        let slot = match mso_text(key, "validityInfo key")? {
             "signed" => &mut signed,
             "validFrom" => &mut valid_from,
             "validUntil" => &mut valid_until,
@@ -320,47 +305,52 @@ fn parse_validity_info(value: Value) -> Result<ValidityInfo, MdocError> {
     Ok(validity)
 }
 
-fn parse_datetime(value: Value) -> Result<crate::time::Timestamp, MdocError> {
-    let Value::Tag(0, inner) = value else {
+fn parse_datetime(value: Item<'_>) -> Result<crate::time::Timestamp, MdocError> {
+    let (tag, inner) = value
+        .tagged()
+        .map_err(|_| mso_error("MSO timestamps require tdate (Tag 0)"))?;
+    if tag != 0 {
         return Err(mso_error("MSO timestamps require tdate (Tag 0)"));
-    };
-    let text = into_text(*inner, "tdate content")?;
+    }
+    let text = mso_text(inner, "tdate content")?;
     if text.len() != 20 || !text.ends_with('Z') || text.as_bytes()[10] != b'T' {
         return Err(mso_error(
             "MSO timestamps require whole UTC seconds with Z offset",
         ));
     }
-    crate::time::Timestamp::parse_rfc3339(&text).map_err(|_| mso_error("invalid MSO timestamp"))
+    crate::time::Timestamp::parse_rfc3339(text).map_err(|_| mso_error("invalid MSO timestamp"))
 }
 
-fn parse_device_key_info(value: Value) -> Result<DeviceKeyInfo, MdocError> {
+fn parse_device_key_info(value: Item<'_>) -> Result<DeviceKeyInfoRef<'_>, MdocError> {
     let mut device_key = None;
     let mut key_authorizations = None;
     let mut key_info = None;
     let mut additional_fields = HashMap::new();
-    for (key, value) in into_map(value, "deviceKeyInfo")? {
-        let key = into_text(key, "deviceKeyInfo key")?;
-        match key.as_str() {
+    for entry in mso_map(value, "deviceKeyInfo")? {
+        let (key, value) = entry?;
+        let key = mso_text(key, "deviceKeyInfo key")?;
+        match key {
             "deviceKey" => {
-                let key = CoseKey::from_cbor_value(value)
-                    .map_err(|error| mso_error(format!("invalid device COSE_Key: {error}")))?;
-                device_key = Some(key);
+                device_key = Some(
+                    CoseKeyRef::parse(value)
+                        .map_err(|error| mso_error(format!("invalid device COSE_Key: {error}")))?,
+                )
             }
             "keyAuthorizations" => key_authorizations = Some(parse_key_authorizations(value)?),
             "keyInfo" => {
-                for (label, _) in as_map(&value, "keyInfo")? {
-                    if label.as_integer().is_none() {
+                for entry in mso_map(value, "keyInfo")? {
+                    if entry?.0.as_integer().is_none() {
                         return Err(mso_error("keyInfo labels must be integers"));
                     }
                 }
-                key_info = Some(value);
+                key_info = Some(CborValueRef::from_item(value));
             }
             _ => {
-                additional_fields.insert(key, value);
+                additional_fields.insert(key, CborValueRef::from_item(value));
             }
         }
     }
-    Ok(DeviceKeyInfo {
+    Ok(DeviceKeyInfoRef {
         device_key: required(device_key, "deviceKeyInfo.deviceKey")?,
         key_authorizations,
         key_info,
@@ -368,26 +358,29 @@ fn parse_device_key_info(value: Value) -> Result<DeviceKeyInfo, MdocError> {
     })
 }
 
-fn parse_key_authorizations(value: Value) -> Result<KeyAuthorizations, MdocError> {
+fn parse_key_authorizations(value: Item<'_>) -> Result<KeyAuthorizationsRef<'_>, MdocError> {
     let mut name_spaces = None;
     let mut data_elements = None;
-    let fields = into_map(value, "keyAuthorizations")?;
-    if fields.is_empty() {
+    let fields = mso_map(value, "keyAuthorizations")?;
+    if fields.len() == 0 {
         return Err(mso_error("keyAuthorizations must not be empty"));
     }
-    for (key, value) in fields {
-        let key = into_text(key, "keyAuthorizations key")?;
-        match key.as_str() {
+    for entry in fields {
+        let (key, value) = entry?;
+        match mso_text(key, "keyAuthorizations key")? {
             "nameSpaces" => name_spaces = Some(parse_authorized_names(value)?),
             "dataElements" => {
-                let namespaces = into_map(value, "authorized dataElements")?;
-                if namespaces.is_empty() {
+                let namespaces = mso_map(value, "authorized dataElements")?;
+                if namespaces.len() == 0 {
                     return Err(mso_error("authorized dataElements must not be empty"));
                 }
                 let mut elements = HashMap::with_capacity(namespaces.len());
-                for (namespace, names) in namespaces {
-                    let namespace = into_text(namespace, "authorized namespace")?;
-                    elements.insert(namespace, parse_authorized_names(names)?);
+                for entry in namespaces {
+                    let (namespace, names) = entry?;
+                    elements.insert(
+                        mso_text(namespace, "authorized namespace")?,
+                        parse_authorized_names(names)?,
+                    );
                 }
                 data_elements = Some(elements);
             }
@@ -403,21 +396,20 @@ fn parse_key_authorizations(value: Value) -> Result<KeyAuthorizations, MdocError
             "keyAuthorizations namespace appears in both authorization forms",
         ));
     }
-    Ok(KeyAuthorizations {
+    Ok(KeyAuthorizationsRef {
         name_spaces,
         data_elements,
     })
 }
 
-fn parse_authorized_names(value: Value) -> Result<Vec<String>, MdocError> {
-    let Value::Array(values) = value else {
-        return Err(mso_error("authorization list must be a nonempty array"));
-    };
-    if values.is_empty() {
+fn parse_authorized_names(value: Item<'_>) -> Result<Vec<&str>, MdocError> {
+    let values = value
+        .array()
+        .map_err(|_| mso_error("authorization list must be a nonempty array"))?;
+    if values.len() == 0 {
         return Err(mso_error("authorization list must be a nonempty array"));
     }
     values
-        .into_iter()
-        .map(|value| into_text(value, "authorized name"))
+        .map(|value| mso_text(value?, "authorized name"))
         .collect()
 }

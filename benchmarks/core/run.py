@@ -50,8 +50,16 @@ def main():
     parser.add_argument("--warmup", type=int, default=100)
     parser.add_argument("--cpu", type=int)
     parser.add_argument("--case")
+    parser.add_argument("--baseline-case")
+    parser.add_argument("--candidate-case")
     parser.add_argument("--unchanged-control", action="store_true", help="Require both paths to have the same binary SHA-256")
     args = parser.parse_args()
+    if (args.baseline_case is None) != (args.candidate_case is None):
+        parser.error("set both --baseline-case and --candidate-case")
+    if args.case and args.baseline_case:
+        parser.error("use --case or the two variant-specific cases")
+    if args.unchanged_control and args.baseline_case != args.candidate_case:
+        parser.error("unchanged control requires the same operation")
     if args.out.exists():
         parser.error("output directory already exists; retain prior observations")
     if args.rounds < 2 or args.samples < 1000 or args.warmup < 16:
@@ -71,8 +79,9 @@ def main():
             command = [str(binaries[variant]), "--fixture", str(args.fixture.resolve()), "--out", str(target.resolve()), "--samples", str(args.samples), "--warmup", str(args.warmup)]
             if args.cpu is not None:
                 command += ["--cpu", str(args.cpu)]
-            if args.case:
-                command += ["--case", args.case]
+            case = args.case or {"baseline": args.baseline_case, "candidate": args.candidate_case}[variant]
+            if case:
+                command += ["--case", case]
             print(f"Round {round_number}, position {position}: {variant}", flush=True)
             with (target / "execution.log").open("w") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)

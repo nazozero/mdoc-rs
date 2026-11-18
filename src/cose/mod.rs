@@ -1,33 +1,34 @@
 //! COSE key and signature utilities for mdoc.
 
 use crate::error::MdocError;
-use coset::{AsCborValue, RegisteredLabelWithPrivate, iana};
+use crate::model::{CoseHeaderRef, CoseLabelRef};
+use coset::{RegisteredLabelWithPrivate, iana};
 
 pub mod key;
 mod structure;
 mod verify;
 
+pub(crate) use key::validate_borrowed_device_public_key;
 pub use key::{CoseKeyExt, cose_alg_to_name};
-pub(crate) use structure::{mac0_structure, sign1_structure};
 #[cfg(feature = "issue")]
-pub(crate) use verify::verify_with_validated_key;
+pub(crate) use structure::sign1_structure;
+pub(crate) use structure::{AuthenticationStructure, with_protected_bytes};
+#[cfg(feature = "issue")]
+pub(crate) use structure::{push_header, push_protected_header};
+#[cfg(feature = "issue")]
+pub(crate) use verify::VerificationKey;
 pub use verify::{validate_verification_key, verify_cose_signature};
+pub(crate) use verify::{
+    verify_cose_signature_borrowed, verify_cose_signature_parts, verify_spki_signature,
+};
 
 /// Check wire labels and decode without normalizing tags into field types.
 /// The bitset records the labels that actually occurred on the wire.
 pub(crate) fn parse_header(
     header: crate::cbor::raw::Item<'_>,
 ) -> Result<(u64, coset::Header), MdocError> {
-    let mut labels = 0u64;
-    for entry in header.map()? {
-        let (label, _) = entry?;
-        let label = match label.uint() {
-            Ok(label @ (1 | 2 | 4 | 33)) => label,
-            _ => return Err(MdocError::Cose("unsupported COSE header extension".into())),
-        };
-        labels |= 1 << label;
-    }
-    Ok((labels, coset::Header::from_cbor_value(header.value()?)?))
+    let borrowed = CoseHeaderRef::parse(header)?;
+    Ok((borrowed.labels, borrowed.into_owned()?))
 }
 
 /// Validate a signature/MAC header without silently accepting security extensions.
@@ -102,6 +103,45 @@ pub(crate) fn validate_parsed_headers(
             seen |= 1 << 33;
         }
     }
+    Ok(algorithm)
+}
+
+/// Validate headers already bound to the immutable original COSE bytes.
+pub(crate) fn validate_borrowed_headers(
+    protected: &CoseHeaderRef<'_>,
+    unprotected: &CoseHeaderRef<'_>,
+) -> Result<i64, MdocError> {
+    use coset::iana::EnumI64;
+    if !unprotected.crit.is_empty() {
+        return Err(MdocError::Cose(
+            "critical headers must be in the protected header bucket".into(),
+        ));
+    }
+    for label in &protected.crit {
+        if *label != CoseLabelRef::Int(iana::HeaderParameter::Alg as i64) {
+            return Err(MdocError::Cose(
+                "unsupported critical COSE header parameter".into(),
+            ));
+        }
+        if protected.alg.is_none() {
+            return Err(MdocError::Cose(
+                "critical alg header is not present in the protected bucket".into(),
+            ));
+        }
+    }
+    if unprotected.alg.is_some() {
+        return Err(MdocError::Cose(
+            "alg must occur only in the protected bucket".into(),
+        ));
+    }
+    let algorithm = match protected.alg {
+        Some(CoseLabelRef::Int(value)) if iana::Algorithm::from_i64(value).is_some() => value,
+        _ => {
+            return Err(MdocError::Cose(
+                "missing or unsupported protected algorithm".into(),
+            ));
+        }
+    };
     Ok(algorithm)
 }
 

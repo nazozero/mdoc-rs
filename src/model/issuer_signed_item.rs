@@ -41,11 +41,15 @@ impl IssuerSignedItem {
     /// require separate authentication. Use [`crate::verify_presentation`] or
     /// [`crate::verifier::verify_issued`] for authenticated decoded claims.
     pub fn verify_digest(&self, expected_digest: &[u8], alg: &DigestAlgorithm) -> bool {
-        use sha2::Digest;
-        match alg {
-            DigestAlgorithm::Sha256 => &sha2::Sha256::digest(&self.encoded)[..] == expected_digest,
-            DigestAlgorithm::Sha384 => &sha2::Sha384::digest(&self.encoded)[..] == expected_digest,
-            DigestAlgorithm::Sha512 => &sha2::Sha512::digest(&self.encoded)[..] == expected_digest,
-        }
+        digest_matches(&self.encoded, expected_digest, alg)
+    }
+}
+
+pub(crate) fn digest_matches(encoded: &[u8], expected: &[u8], alg: &DigestAlgorithm) -> bool {
+    use sha2::Digest;
+    match alg {
+        DigestAlgorithm::Sha256 => &sha2::Sha256::digest(encoded)[..] == expected,
+        DigestAlgorithm::Sha384 => &sha2::Sha384::digest(encoded)[..] == expected,
+        DigestAlgorithm::Sha512 => &sha2::Sha512::digest(encoded)[..] == expected,
     }
 }

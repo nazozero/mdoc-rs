@@ -1,0 +1,784 @@
+{
+  "date": "2026-11-18",
+  "registry": "crates.io",
+  "stable_rule": "no prerelease identifiers; build metadata permitted",
+  "packages": {
+    "autocfg": {
+      "locked": [
+        "1.5.1"
+      ],
+      "latest_stable": "1.5.1",
+      "rust_version": "1.0",
+      "source": "https://index.crates.io/au/to/autocfg"
+    },
+    "base16ct": {
+      "locked": [
+        "1.0.0"
+      ],
+      "latest_stable": "1.0.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ba/se/base16ct"
+    },
+    "base64ct": {
+      "locked": [
+        "1.8.3"
+      ],
+      "latest_stable": "1.8.3",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ba/se/base64ct"
+    },
+    "bitflags": {
+      "locked": [
+        "2.13.2"
+      ],
+      "latest_stable": "2.13.2",
+      "rust_version": "1.56.0",
+      "source": "https://index.crates.io/bi/tf/bitflags"
+    },
+    "block-buffer": {
+      "locked": [
+        "0.12.1"
+      ],
+      "latest_stable": "0.12.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/bl/oc/block-buffer"
+    },
+    "bumpalo": {
+      "locked": [
+        "3.20.4"
+      ],
+      "latest_stable": "3.20.4",
+      "rust_version": "1.71.1",
+      "source": "https://index.crates.io/bu/mp/bumpalo"
+    },
+    "cfg-if": {
+      "locked": [
+        "1.0.5"
+      ],
+      "latest_stable": "1.0.5",
+      "rust_version": "1.32",
+      "source": "https://index.crates.io/cf/g-/cfg-if"
+    },
+    "chacha20": {
+      "locked": [
+        "0.10.2"
+      ],
+      "latest_stable": "0.10.2",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ch/ac/chacha20"
+    },
+    "ciborium": {
+      "locked": [
+        "0.2.2"
+      ],
+      "latest_stable": "0.2.2",
+      "rust_version": "1.58",
+      "source": "https://index.crates.io/ci/bo/ciborium"
+    },
+    "ciborium-io": {
+      "locked": [
+        "0.2.2"
+      ],
+      "latest_stable": "0.2.2",
+      "rust_version": "1.58",
+      "source": "https://index.crates.io/ci/bo/ciborium-io"
+    },
+    "ciborium-ll": {
+      "locked": [
+        "0.2.2"
+      ],
+      "latest_stable": "0.2.2",
+      "rust_version": "1.58",
+      "source": "https://index.crates.io/ci/bo/ciborium-ll"
+    },
+    "cmov": {
+      "locked": [
+        "0.5.4"
+      ],
+      "latest_stable": "0.5.4",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/cm/ov/cmov"
+    },
+    "const-oid": {
+      "locked": [
+        "0.10.3"
+      ],
+      "latest_stable": "0.10.3",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/co/ns/const-oid"
+    },
+    "core_detect": {
+      "locked": [
+        "1.0.0"
+      ],
+      "latest_stable": "1.0.0",
+      "rust_version": null,
+      "source": "https://index.crates.io/co/re/core_detect"
+    },
+    "coset": {
+      "locked": [
+        "0.4.2"
+      ],
+      "latest_stable": "0.4.2",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/co/se/coset"
+    },
+    "cpubits": {
+      "locked": [
+        "0.1.1"
+      ],
+      "latest_stable": "0.1.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/cp/ub/cpubits"
+    },
+    "cpufeatures": {
+      "locked": [
+        "0.3.1"
+      ],
+      "latest_stable": "0.3.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/cp/uf/cpufeatures"
+    },
+    "crunchy": {
+      "locked": [
+        "0.2.4"
+      ],
+      "latest_stable": "0.2.4",
+      "rust_version": null,
+      "source": "https://index.crates.io/cr/un/crunchy"
+    },
+    "crypto-bigint": {
+      "locked": [
+        "0.7.11"
+      ],
+      "latest_stable": "0.7.11",
+      "rust_version": "1.87",
+      "source": "https://index.crates.io/cr/yp/crypto-bigint"
+    },
+    "crypto-common": {
+      "locked": [
+        "0.2.2"
+      ],
+      "latest_stable": "0.2.2",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/cr/yp/crypto-common"
+    },
+    "ctutils": {
+      "locked": [
+        "0.4.8"
+      ],
+      "latest_stable": "0.4.8",
+      "rust_version": "1.87",
+      "source": "https://index.crates.io/ct/ut/ctutils"
+    },
+    "curve25519-dalek": {
+      "locked": [
+        "5.0.0"
+      ],
+      "latest_stable": "5.0.0",
+      "rust_version": "1.85.0",
+      "source": "https://index.crates.io/cu/rv/curve25519-dalek"
+    },
+    "curve25519-dalek-derive": {
+      "locked": [
+        "0.1.1"
+      ],
+      "latest_stable": "0.1.1",
+      "rust_version": null,
+      "source": "https://index.crates.io/cu/rv/curve25519-dalek-derive"
+    },
+    "der": {
+      "locked": [
+        "0.8.3"
+      ],
+      "latest_stable": "0.8.3",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/3/d/der"
+    },
+    "der_derive": {
+      "locked": [
+        "0.8.0"
+      ],
+      "latest_stable": "0.8.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/de/r_/der_derive"
+    },
+    "deranged": {
+      "locked": [
+        "0.5.9"
+      ],
+      "latest_stable": "0.5.9",
+      "rust_version": "1.85.0",
+      "source": "https://index.crates.io/de/ra/deranged"
+    },
+    "digest": {
+      "locked": [
+        "0.11.3"
+      ],
+      "latest_stable": "0.11.3",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/di/ge/digest"
+    },
+    "ecdsa": {
+      "locked": [
+        "0.17.0"
+      ],
+      "latest_stable": "0.17.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ec/ds/ecdsa"
+    },
+    "ed25519": {
+      "locked": [
+        "3.0.0"
+      ],
+      "latest_stable": "3.0.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ed/25/ed25519"
+    },
+    "ed25519-dalek": {
+      "locked": [
+        "3.0.0"
+      ],
+      "latest_stable": "3.0.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ed/25/ed25519-dalek"
+    },
+    "elliptic-curve": {
+      "locked": [
+        "0.14.3"
+      ],
+      "latest_stable": "0.14.3",
+      "rust_version": "1.87",
+      "source": "https://index.crates.io/el/li/elliptic-curve"
+    },
+    "ff": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/2/ff"
+    },
+    "fiat-crypto": {
+      "locked": [
+        "0.3.0"
+      ],
+      "latest_stable": "0.3.0",
+      "rust_version": "1.83.0",
+      "source": "https://index.crates.io/fi/at/fiat-crypto"
+    },
+    "flagset": {
+      "locked": [
+        "0.4.7"
+      ],
+      "latest_stable": "0.4.7",
+      "rust_version": "1.65",
+      "source": "https://index.crates.io/fl/ag/flagset"
+    },
+    "getrandom": {
+      "locked": [
+        "0.4.3"
+      ],
+      "latest_stable": "0.4.3",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ge/tr/getrandom"
+    },
+    "group": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/gr/ou/group"
+    },
+    "half": {
+      "locked": [
+        "2.7.1"
+      ],
+      "latest_stable": "2.7.1",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/ha/lf/half"
+    },
+    "hex": {
+      "locked": [
+        "0.4.3"
+      ],
+      "latest_stable": "0.4.3",
+      "rust_version": null,
+      "source": "https://index.crates.io/3/h/hex"
+    },
+    "hkdf": {
+      "locked": [
+        "0.13.0"
+      ],
+      "latest_stable": "0.13.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/hk/df/hkdf"
+    },
+    "hmac": {
+      "locked": [
+        "0.13.0"
+      ],
+      "latest_stable": "0.13.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/hm/ac/hmac"
+    },
+    "hybrid-array": {
+      "locked": [
+        "0.4.15"
+      ],
+      "latest_stable": "0.4.15",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/hy/br/hybrid-array"
+    },
+    "iri-string": {
+      "locked": [
+        "0.7.14"
+      ],
+      "latest_stable": "0.7.14",
+      "rust_version": "1.60",
+      "source": "https://index.crates.io/ir/i-/iri-string"
+    },
+    "js-sys": {
+      "locked": [
+        "0.3.107"
+      ],
+      "latest_stable": "0.3.107",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/js/-s/js-sys"
+    },
+    "libc": {
+      "locked": [
+        "0.2.191"
+      ],
+      "latest_stable": "0.2.191",
+      "rust_version": "1.65",
+      "source": "https://index.crates.io/li/bc/libc"
+    },
+    "num-conv": {
+      "locked": [
+        "0.2.2"
+      ],
+      "latest_stable": "0.2.2",
+      "rust_version": "1.57.0",
+      "source": "https://index.crates.io/nu/m-/num-conv"
+    },
+    "num-traits": {
+      "locked": [
+        "0.2.19"
+      ],
+      "latest_stable": "0.2.19",
+      "rust_version": "1.60",
+      "source": "https://index.crates.io/nu/m-/num-traits"
+    },
+    "p256": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/p2/56/p256"
+    },
+    "p384": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/p3/84/p384"
+    },
+    "p521": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/p5/21/p521"
+    },
+    "pem-rfc7468": {
+      "locked": [
+        "1.0.0"
+      ],
+      "latest_stable": "1.0.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/pe/m-/pem-rfc7468"
+    },
+    "pkcs8": {
+      "locked": [
+        "0.11.0"
+      ],
+      "latest_stable": "0.11.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/pk/cs/pkcs8"
+    },
+    "powerfmt": {
+      "locked": [
+        "0.2.1"
+      ],
+      "latest_stable": "0.2.1",
+      "rust_version": "1.79.0",
+      "source": "https://index.crates.io/po/we/powerfmt"
+    },
+    "primefield": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/pr/im/primefield"
+    },
+    "primeorder": {
+      "locked": [
+        "0.14.0"
+      ],
+      "latest_stable": "0.14.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/pr/im/primeorder"
+    },
+    "proc-macro2": {
+      "locked": [
+        "1.0.107"
+      ],
+      "latest_stable": "1.0.107",
+      "rust_version": "1.71",
+      "source": "https://index.crates.io/pr/oc/proc-macro2"
+    },
+    "proptest": {
+      "locked": [
+        "1.12.0"
+      ],
+      "latest_stable": "1.12.0",
+      "rust_version": "1.88",
+      "source": "https://index.crates.io/pr/op/proptest"
+    },
+    "quote": {
+      "locked": [
+        "1.0.47"
+      ],
+      "latest_stable": "1.0.47",
+      "rust_version": "1.71",
+      "source": "https://index.crates.io/qu/ot/quote"
+    },
+    "r-efi": {
+      "locked": [
+        "6.0.0"
+      ],
+      "latest_stable": "7.2.0",
+      "rust_version": "1.68",
+      "source": "https://index.crates.io/r-/ef/r-efi"
+    },
+    "rand": {
+      "locked": [
+        "0.10.4"
+      ],
+      "latest_stable": "0.10.4",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ra/nd/rand"
+    },
+    "rand_core": {
+      "locked": [
+        "0.10.1"
+      ],
+      "latest_stable": "0.10.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ra/nd/rand_core"
+    },
+    "rand_xorshift": {
+      "locked": [
+        "0.5.0"
+      ],
+      "latest_stable": "0.5.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ra/nd/rand_xorshift"
+    },
+    "regex-syntax": {
+      "locked": [
+        "0.8.12"
+      ],
+      "latest_stable": "0.8.12",
+      "rust_version": "1.65",
+      "source": "https://index.crates.io/re/ge/regex-syntax"
+    },
+    "rfc6979": {
+      "locked": [
+        "0.6.0"
+      ],
+      "latest_stable": "0.6.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/rf/c6/rfc6979"
+    },
+    "rustc_version": {
+      "locked": [
+        "0.4.1"
+      ],
+      "latest_stable": "0.4.1",
+      "rust_version": "1.32",
+      "source": "https://index.crates.io/ru/st/rustc_version"
+    },
+    "rustversion": {
+      "locked": [
+        "1.0.23"
+      ],
+      "latest_stable": "1.0.23",
+      "rust_version": "1.31",
+      "source": "https://index.crates.io/ru/st/rustversion"
+    },
+    "sec1": {
+      "locked": [
+        "0.8.1"
+      ],
+      "latest_stable": "0.8.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/se/c1/sec1"
+    },
+    "semver": {
+      "locked": [
+        "1.0.28"
+      ],
+      "latest_stable": "1.0.28",
+      "rust_version": "1.68",
+      "source": "https://index.crates.io/se/mv/semver"
+    },
+    "serde": {
+      "locked": [
+        "1.0.229"
+      ],
+      "latest_stable": "1.0.229",
+      "rust_version": "1.56",
+      "source": "https://index.crates.io/se/rd/serde"
+    },
+    "serde_core": {
+      "locked": [
+        "1.0.229"
+      ],
+      "latest_stable": "1.0.229",
+      "rust_version": "1.56",
+      "source": "https://index.crates.io/se/rd/serde_core"
+    },
+    "serde_derive": {
+      "locked": [
+        "1.0.229"
+      ],
+      "latest_stable": "1.0.229",
+      "rust_version": "1.71",
+      "source": "https://index.crates.io/se/rd/serde_derive"
+    },
+    "serdect": {
+      "locked": [
+        "0.4.3"
+      ],
+      "latest_stable": "0.4.3",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/se/rd/serdect"
+    },
+    "sha1": {
+      "locked": [
+        "0.11.0"
+      ],
+      "latest_stable": "0.11.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/sh/a1/sha1"
+    },
+    "sha2": {
+      "locked": [
+        "0.11.1"
+      ],
+      "latest_stable": "0.11.1",
+      "rust_version": "1.88",
+      "source": "https://index.crates.io/sh/a2/sha2"
+    },
+    "signature": {
+      "locked": [
+        "3.0.0"
+      ],
+      "latest_stable": "3.0.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/si/gn/signature"
+    },
+    "spki": {
+      "locked": [
+        "0.8.1"
+      ],
+      "latest_stable": "0.8.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/sp/ki/spki"
+    },
+    "subtle": {
+      "locked": [
+        "2.6.1"
+      ],
+      "latest_stable": "2.6.1",
+      "rust_version": null,
+      "source": "https://index.crates.io/su/bt/subtle"
+    },
+    "syn": {
+      "locked": [
+        "2.0.119",
+        "3.0.10"
+      ],
+      "latest_stable": "3.0.10",
+      "rust_version": "1.71",
+      "source": "https://index.crates.io/3/s/syn"
+    },
+    "thiserror": {
+      "locked": [
+        "2.0.21"
+      ],
+      "latest_stable": "2.0.21",
+      "rust_version": "1.77",
+      "source": "https://index.crates.io/th/is/thiserror"
+    },
+    "thiserror-impl": {
+      "locked": [
+        "2.0.21"
+      ],
+      "latest_stable": "2.0.21",
+      "rust_version": "1.77",
+      "source": "https://index.crates.io/th/is/thiserror-impl"
+    },
+    "time": {
+      "locked": [
+        "0.3.55"
+      ],
+      "latest_stable": "0.3.55",
+      "rust_version": "1.88.0",
+      "source": "https://index.crates.io/ti/me/time"
+    },
+    "time-core": {
+      "locked": [
+        "0.1.9"
+      ],
+      "latest_stable": "0.1.9",
+      "rust_version": "1.88.0",
+      "source": "https://index.crates.io/ti/me/time-core"
+    },
+    "time-macros": {
+      "locked": [
+        "0.2.32"
+      ],
+      "latest_stable": "0.2.32",
+      "rust_version": "1.88.0",
+      "source": "https://index.crates.io/ti/me/time-macros"
+    },
+    "tls_codec": {
+      "locked": [
+        "0.4.2"
+      ],
+      "latest_stable": "0.5.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/tl/s_/tls_codec"
+    },
+    "tls_codec_derive": {
+      "locked": [
+        "0.4.2"
+      ],
+      "latest_stable": "0.5.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/tl/s_/tls_codec_derive"
+    },
+    "typenum": {
+      "locked": [
+        "1.20.1"
+      ],
+      "latest_stable": "1.20.1",
+      "rust_version": "1.41.0",
+      "source": "https://index.crates.io/ty/pe/typenum"
+    },
+    "unarray": {
+      "locked": [
+        "0.1.4"
+      ],
+      "latest_stable": "0.1.4",
+      "rust_version": null,
+      "source": "https://index.crates.io/un/ar/unarray"
+    },
+    "unicode-ident": {
+      "locked": [
+        "1.0.27"
+      ],
+      "latest_stable": "1.0.27",
+      "rust_version": "1.71",
+      "source": "https://index.crates.io/un/ic/unicode-ident"
+    },
+    "wasm-bindgen": {
+      "locked": [
+        "0.2.130"
+      ],
+      "latest_stable": "0.2.130",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/wa/sm/wasm-bindgen"
+    },
+    "wasm-bindgen-macro": {
+      "locked": [
+        "0.2.130"
+      ],
+      "latest_stable": "0.2.130",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/wa/sm/wasm-bindgen-macro"
+    },
+    "wasm-bindgen-macro-support": {
+      "locked": [
+        "0.2.130"
+      ],
+      "latest_stable": "0.2.130",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/wa/sm/wasm-bindgen-macro-support"
+    },
+    "wasm-bindgen-shared": {
+      "locked": [
+        "0.2.130"
+      ],
+      "latest_stable": "0.2.130",
+      "rust_version": "1.81",
+      "source": "https://index.crates.io/wa/sm/wasm-bindgen-shared"
+    },
+    "wnaf": {
+      "locked": [
+        "0.14.1"
+      ],
+      "latest_stable": "0.14.1",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/wn/af/wnaf"
+    },
+    "x509-cert": {
+      "locked": [
+        "0.3.0"
+      ],
+      "latest_stable": "0.3.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/x5/09/x509-cert"
+    },
+    "zerocopy": {
+      "locked": [
+        "0.8.63"
+      ],
+      "latest_stable": "0.8.63",
+      "rust_version": "1.56.0",
+      "source": "https://index.crates.io/ze/ro/zerocopy"
+    },
+    "zerocopy-derive": {
+      "locked": [
+        "0.8.63"
+      ],
+      "latest_stable": "0.8.63",
+      "rust_version": null,
+      "source": "https://index.crates.io/ze/ro/zerocopy-derive"
+    },
+    "zeroize": {
+      "locked": [
+        "1.9.2"
+      ],
+      "latest_stable": "1.9.2",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ze/ro/zeroize"
+    },
+    "zeroize_derive": {
+      "locked": [
+        "1.5.0"
+      ],
+      "latest_stable": "1.5.0",
+      "rust_version": "1.85",
+      "source": "https://index.crates.io/ze/ro/zeroize_derive"
+    }
+  }
+}

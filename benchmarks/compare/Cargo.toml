@@ -12,16 +12,16 @@ license = "BSD-2-Clause"
 [dependencies]
 baseline = { package = "mdoc-rs", git = "https://github.com/nazozero/mdoc-rs", rev = "9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc", default-features = false, features = ["issue"] }
 candidate = { package = "nazo-mdoc", path = "../..", default-features = false, features = ["issue"] }
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-ciborium = "0.2"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+ciborium = "0.2.2"
 coset = "0.4.2"
-der = "0.7"
-hex = "0.4"
-libc = "0.2"
-p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
-sha2 = "0.10"
-signature = "3"
-x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+der = "0.8.3"
+hex = "0.4.3"
+libc = "0.2.191"
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "std"] }
+sha2 = "0.11.1"
+signature = "3.0.0"
+x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = 3

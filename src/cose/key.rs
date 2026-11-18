@@ -10,6 +10,7 @@ use coset::iana;
 /// Private coordinates and unsupported algorithms must never enter an MSO.
 /// Point validation is delegated to the same RustCrypto implementations used
 /// for signature verification, not reimplemented here.
+#[cfg(feature = "issue")]
 pub(crate) fn validate_device_public_key(key: &coset::CoseKey) -> Result<(), MdocError> {
     let alg = match (&key.kty, key.curve()?) {
         (coset::KeyType::Assigned(iana::KeyType::EC2), 1) => -7,
@@ -18,46 +19,27 @@ pub(crate) fn validate_device_public_key(key: &coset::CoseKey) -> Result<(), Mdo
         (coset::KeyType::Assigned(iana::KeyType::OKP), 6) => -8,
         _ => return Err(MdocError::Cose("unsupported device public key".into())),
     };
-    crate::cose::validate_verification_key(key, alg)?;
-    let invalid = || MdocError::Cose("invalid device public point".into());
-    match alg {
-        -7 => {
-            p256::ecdsa::VerifyingKey::from_sec1_bytes(&ec2_point::<65>(key)?)
-                .map_err(|_| invalid())?;
-        }
-        -35 => {
-            p384::ecdsa::VerifyingKey::from_sec1_bytes(&ec2_point::<97>(key)?)
-                .map_err(|_| invalid())?;
-        }
-        -36 => {
-            p521::ecdsa::VerifyingKey::from_sec1_bytes(&ec2_point::<133>(key)?)
-                .map_err(|_| invalid())?;
-        }
-        -8 => {
-            let public = ed25519_dalek::VerifyingKey::from_bytes(
-                get_param(&key.params, -2)?
-                    .try_into()
-                    .map_err(|_| invalid())?,
-            )
-            .map_err(|_| invalid())?;
-            if public.is_weak() {
-                return Err(invalid());
-            }
-        }
-        _ => unreachable!("validated supported algorithm"),
-    }
-    Ok(())
+    crate::cose::verify::VerificationKey::from_cose(key, alg)?.validate_device_point()
 }
 
-/// The caller has checked the algorithm, curve and coordinate widths with
-/// validate_verification_key. N is the uncompressed SEC1 width for that curve.
-pub(super) fn ec2_point<const N: usize>(key: &coset::CoseKey) -> Result<[u8; N], MdocError> {
-    let width = (N - 1) / 2;
-    let mut point = [0; N];
-    point[0] = 4;
-    point[1..1 + width].copy_from_slice(get_param(&key.params, -2)?);
-    point[1 + width..].copy_from_slice(get_param(&key.params, -3)?);
-    Ok(point)
+/// Validate a device key directly from its original MSO parameters.
+pub(crate) fn validate_borrowed_device_public_key(
+    key: &crate::model::CoseKeyRef<'_>,
+) -> Result<(), MdocError> {
+    use crate::model::CoseLabelRef;
+    let curve = key.params.iter().find_map(|(label, value)| {
+        (*label == CoseLabelRef::Int(-1))
+            .then(|| value.as_integer())
+            .flatten()
+    });
+    let alg = match (key.kty, curve) {
+        (CoseLabelRef::Int(2), Some(1)) => algorithms::ES256,
+        (CoseLabelRef::Int(2), Some(2)) => algorithms::ES384,
+        (CoseLabelRef::Int(2), Some(3)) => algorithms::ES512,
+        (CoseLabelRef::Int(1), Some(6)) => algorithms::EDDSA,
+        _ => return Err(MdocError::Cose("unsupported device public key".into())),
+    };
+    crate::cose::verify::VerificationKey::from_borrowed(key, alg)?.validate_device_point()
 }
 
 /// Extension trait for `coset::CoseKey` with mdoc-specific operations.
@@ -206,6 +188,27 @@ pub fn cose_key_from_pem(pem: &str) -> Result<coset::CoseKey, MdocError> {
 pub fn cose_key_from_spki(
     spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
 ) -> Result<coset::CoseKey, MdocError> {
+    let (alg, bytes) = spki_key_bytes(spki)?;
+    if alg == algorithms::EDDSA {
+        return Ok(coset::CoseKeyBuilder::new_okp_key()
+            .param(-1, ciborium::Value::Integer(curves::ED25519.into()))
+            .param(-2, ciborium::Value::Bytes(bytes.to_vec()))
+            .build());
+    }
+    let curve = match alg {
+        algorithms::ES256 => curves::P256,
+        algorithms::ES384 => curves::P384,
+        algorithms::ES512 => curves::P521,
+        _ => unreachable!("supported SPKI algorithm"),
+    };
+    cose_key_from_sec1_bytes(curve, bytes)
+}
+
+/// Read the algorithm and original public point without converting through an
+/// owned COSE key. This preserves the SPKI restrictions of the public adapter.
+pub(super) fn spki_key_bytes(
+    spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
+) -> Result<(i64, &[u8]), MdocError> {
     use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
     if spki.algorithm.oid == const_oid::ObjectIdentifier::new_unwrap("1.3.101.112") {
         if spki.algorithm.parameters.is_some() {
@@ -220,10 +223,7 @@ pub fn cose_key_from_spki(
         if bytes.len() != 32 {
             return Err(MdocError::Cose("invalid Ed25519 SPKI length".into()));
         }
-        return Ok(coset::CoseKeyBuilder::new_okp_key()
-            .param(-1, ciborium::Value::Integer(6.into()))
-            .param(-2, ciborium::Value::Bytes(bytes.to_vec()))
-            .build());
+        return Ok((algorithms::EDDSA, bytes));
     }
     if spki.algorithm.oid != ID_EC_PUBLIC_KEY {
         return Err(MdocError::Cose(format!(
@@ -231,31 +231,31 @@ pub fn cose_key_from_spki(
             spki.algorithm.oid
         )));
     }
-
-    // The named-curve OID is carried in the algorithm parameters.
     let curve_oid = spki
         .algorithm
         .parameters
         .as_ref()
-        .ok_or_else(|| MdocError::Cose("EC public key missing curve parameters".to_string()))?
+        .ok_or_else(|| MdocError::Cose("EC public key missing curve parameters".into()))?
         .decode_as::<der::asn1::ObjectIdentifier>()
         .map_err(|e| MdocError::Cose(format!("decode EC curve OID: {e}")))?;
-
-    let curve_id = match curve_oid {
-        SECP_256_R_1 => curves::P256,
-        SECP_384_R_1 => curves::P384,
-        SECP_521_R_1 => curves::P521,
-        other => {
-            return Err(MdocError::Cose(format!("unsupported EC curve OID {other}")));
-        }
+    let (alg, width) = match curve_oid {
+        SECP_256_R_1 => (algorithms::ES256, 32),
+        SECP_384_R_1 => (algorithms::ES384, 48),
+        SECP_521_R_1 => (algorithms::ES512, 66),
+        other => return Err(MdocError::Cose(format!("unsupported EC curve OID {other}"))),
     };
-
     let point = spki
         .subject_public_key
         .as_bytes()
-        .ok_or_else(|| MdocError::Cose("EC public key is not byte-aligned".to_string()))?;
-
-    cose_key_from_sec1_bytes(curve_id, point)
+        .ok_or_else(|| MdocError::Cose("EC public key is not byte-aligned".into()))?;
+    if point.len() != 1 + 2 * width || point[0] != 4 {
+        return Err(MdocError::Cose(format!(
+            "expected uncompressed SEC1 point (0x04 + {} bytes), got {} bytes",
+            2 * width,
+            point.len()
+        )));
+    }
+    Ok((alg, point))
 }
 
 /// COSE curve identifiers.
