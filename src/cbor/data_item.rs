@@ -135,9 +135,13 @@ pub fn wrap_tag24(data: &[u8]) -> Value {
 
 /// Unwrap CBOR Tag 24 to get the inner bytes.
 pub fn unwrap_tag24(value: &Value) -> Result<Vec<u8>, MdocError> {
+    tag24_bytes(value).map(<[u8]>::to_vec)
+}
+
+fn tag24_bytes(value: &Value) -> Result<&[u8], MdocError> {
     match value {
         Value::Tag(TAG_ENCODED_CBOR, inner) => match inner.as_ref() {
-            Value::Bytes(bytes) => Ok(bytes.clone()),
+            Value::Bytes(bytes) => Ok(bytes),
             _ => Err(MdocError::Cbor(
                 "Tag 24 inner value is not bytes".to_string(),
             )),
@@ -148,14 +152,15 @@ pub fn unwrap_tag24(value: &Value) -> Result<Vec<u8>, MdocError> {
 
 /// Encode a value and wrap it in Tag 24.
 pub fn encode_as_tag24(value: &Value) -> Result<Value, MdocError> {
-    let encoded = encode_cbor(value)?;
-    Ok(wrap_tag24(&encoded))
+    Ok(Value::Tag(
+        TAG_ENCODED_CBOR,
+        Box::new(Value::Bytes(encode_cbor(value)?)),
+    ))
 }
 
 /// Unwrap Tag 24 and decode the inner CBOR.
 pub fn decode_tag24(value: &Value) -> Result<Value, MdocError> {
-    let bytes = unwrap_tag24(value)?;
-    decode_cbor(&bytes)
+    decode_cbor(tag24_bytes(value)?)
 }
 
 #[cfg(test)]

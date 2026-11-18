@@ -387,7 +387,14 @@ impl<'a> Iterator for Map<'a> {
             .expect("validated map has an even number of items");
         Some(key.and_then(|key| value.map(|value| (key, value))))
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.items.len() / 2;
+        (count, Some(count))
+    }
 }
+
+impl ExactSizeIterator for Map<'_> {}
 
 /// Append a shortest CBOR integer/length header without constructing a Value.
 pub(crate) fn push_head(out: &mut Vec<u8>, major: u8, value: u64) {

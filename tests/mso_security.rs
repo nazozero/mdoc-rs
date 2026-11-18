@@ -250,6 +250,68 @@ fn embedded_duplicates_nonshortest_and_indefinite_lengths_are_rejected() {
 }
 
 #[test]
+fn public_mso_revalidates_duplicate_maps_after_payload_mutation() {
+    let mut original = valid_mso();
+    set(
+        &mut original,
+        "status",
+        status(0.into(), text("https://issuer.example/status/list")),
+    );
+    let key_info = member_mut(&mut original, "deviceKeyInfo");
+    set(
+        key_info,
+        "keyInfo",
+        Value::Map(vec![(1.into(), true.into())]),
+    );
+    set(
+        key_info,
+        "keyAuthorizations",
+        map([
+            ("nameSpaces", Value::Array(vec![text("org.example.other")])),
+            (
+                "dataElements",
+                map([(NAMESPACE, Value::Array(vec![text("family_name")]))]),
+            ),
+        ]),
+    );
+    set(&mut original, "future", map([("extension", true.into())]));
+    let auth = auth_with_payload(tagged(encode(&original)));
+    assert!(auth.mso().is_ok());
+
+    // A public IssuerAuth remains mutable after a successful MSO read. Every
+    // map must be checked again at that public byte boundary.
+    for path in [
+        &[][..],
+        &["valueDigests"],
+        &["valueDigests", NAMESPACE],
+        &["validityInfo"],
+        &["deviceKeyInfo"],
+        &["deviceKeyInfo", "deviceKey"],
+        &["deviceKeyInfo", "keyInfo"],
+        &["deviceKeyInfo", "keyAuthorizations"],
+        &["deviceKeyInfo", "keyAuthorizations", "dataElements"],
+        &["status"],
+        &["status", "status_list"],
+        &["future"],
+    ] {
+        let mut changed = original.clone();
+        let mut value = &mut changed;
+        for key in path {
+            value = member_mut(value, key);
+        }
+        let entries = value.as_map_mut().unwrap();
+        entries.push(entries[0].clone());
+        let mut changed_auth = auth.clone();
+        changed_auth.cose_sign1.payload = Some(tagged(encode(&changed)));
+        assert!(
+            matches!(changed_auth.mso(), Err(nazo_mdoc::MdocError::Cbor(message))
+                if message == "duplicate CBOR map key"),
+            "duplicate map at {path:?} reached model projection"
+        );
+    }
+}
+
+#[test]
 fn digest_algorithms_and_output_lengths_are_bound() {
     for (algorithm, size) in [("SHA-256", 32), ("SHA-384", 48), ("SHA-512", 64)] {
         let mut value = valid_mso();
