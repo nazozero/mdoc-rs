@@ -1,0 +1,3201 @@
+{
+  "scope": "Five measured experiments; preflight observations listed separately. No benchmark or Cargo process was run during independent recalculation.",
+  "method": {
+    "quantile": "Nearest rank: sorted sample at 1-based ceil(n*p/100), independently using integer arithmetic.",
+    "mean": "Exact integer sum divided by sample count using Decimal, compared exactly to each CSV field.",
+    "reported_comparisons": "Median across process-round statistics for each variant; change=(candidate/baseline-1)*100. Four rounds except two-round unchanged control. Means below are medians of per-round means.",
+    "no_discard_check": "Every case in every recorded measurement process retains exactly observation IDs 0..999, in order; all raw groups match the complete summary and execution logs. No failing, missing or extra process is present in the recorded five experiments.",
+    "allocation_semantics": "Separate operation invocation; successful alloc + alloc_zeroed + realloc calls and full requested realloc capacity; includes result destruction. Requested bytes are allocation traffic, not live/peak memory.",
+    "comparison_tuple": "[baseline value, candidate value, percentage change]; time values are nanoseconds. Percentages rounded to 8 decimals for this compact artifact; all CSV checks were exact.",
+    "allocation_statistics": "Allocation fields show per-round P50 medians; constant_in_all_samples=true also verifies p50/p95/p99/mean and every raw observation are identical for each variant."
+  },
+  "counts": {
+    "experiments": 5,
+    "measurement_processes": 36,
+    "measurement_sample_files": 36,
+    "case_process_groups": 252,
+    "retained_sample_rows": 252000,
+    "numeric_summary_fields_checked": 4032,
+    "summary_observation_fields_checked": 252,
+    "preflight_processes": 2,
+    "preflight_sample_rows": 39,
+    "errors": 0,
+    "measurement_manifest_entry_checks": 1424,
+    "distinct_source_blobs_checked": 78,
+    "previous_main_equivalent_library_files": 28
+  },
+  "source_provenance": {
+    "previous_main_revision": "752b402e2d4e29407eb1e9ad81eeca5c085b235e",
+    "previous_binary_build_head": "de10f77447a4e09563589bc71fdc94eb15bb2539",
+    "current_binary_build_head": "27c68b248260c7c0c0c4268b1cf9f44413241eb0",
+    "measurement_checkout_head": "27c68b248260c7c0c0c4268b1cf9f44413241eb0",
+    "legacy_metadata_baseline_revision": "070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc is the harness historical reference, not the revision of either measured binary. The metadata variant=candidate is the baked harness feature, not the experimental baseline/candidate role.",
+    "source_manifests": [
+      {
+        "build_head": "de10f77447a4e09563589bc71fdc94eb15bb2539",
+        "sha256": "1577a2e9bbe50d2fe8529bb072745f0201054077ab6ebd61dca4e23e8ab02fad",
+        "entries": 38,
+        "previous_main_equivalent_library_entries": 28,
+        "instances": 9,
+        "embedded_in_actual_executable": true,
+        "measurement_instances": 8,
+        "measurement_entry_checks": 304
+      },
+      {
+        "build_head": "27c68b248260c7c0c0c4268b1cf9f44413241eb0",
+        "sha256": "610d86e12560a004a0316039eb7efb7c7c00d839eb930a43a61f23e5aba20e1c",
+        "entries": 40,
+        "previous_main_equivalent_library_entries": 0,
+        "instances": 29,
+        "embedded_in_actual_executable": true,
+        "measurement_instances": 28,
+        "measurement_entry_checks": 1120
+      }
+    ],
+    "binaries": {
+      "/workspace/scratch/9016223f8bec/retained-issue4-final-benchmark": {
+        "sha256": "eb4d481e65ea2db5d64492f460392c9932bfea94f9a24cb215d8a644c9384e65",
+        "bytes": 9385952
+      },
+      "/workspace/scratch/9016223f8bec/target-benchmark/release/mdoc-core-benchmark": {
+        "sha256": "d94df1e8e05d9efed574d9f18fae82ad8a87d2254ba4dd0e4de2040252141633",
+        "bytes": 9961176
+      }
+    }
+  },
+  "input_fingerprints": {
+    "identical_record_sets": 38,
+    "items_per_record": 7,
+    "values": {
+      "annex": {
+        "bytes": 3529,
+        "sha256": "3908aabd02e0605e7549913f5f14a8bb24155325584d5097a5ad7161e8549919"
+      },
+      "final_response": {
+        "bytes": 1353,
+        "sha256": "fe55a7a51aa395713fef5e24d7c0b2397a54ae9118eb1623d15ac89252bc7c33"
+      },
+      "transcript": {
+        "bytes": 56,
+        "sha256": "d32832dc274a0d546e03591a287933ba2f37ed195396a5d6ae0e407f341d252f"
+      },
+      "inner_mso": {
+        "bytes": 925,
+        "sha256": "61c7469e5ad82190193dc4e53e237bb9ddc7ddc07c2e422f71b5414aac438090"
+      },
+      "canonical_mso": {
+        "bytes": 925,
+        "sha256": "89c6ed882c7c8f2c7dc588fad578229a3b2e5dc3f5ccce6a0b86137c7481a17b"
+      },
+      "issuer_sig_structure": {
+        "bytes": 950,
+        "sha256": "fb1a40d440ac12fa81d613033dba230002844fe4ffa1eaaa0186dff45c657396"
+      },
+      "device_authentication": {
+        "bytes": 108,
+        "sha256": "35db82e0f35e9ef3c763feed47bae7469c17c5a72e1acc6684ed5a64b2d2ac7d"
+      }
+    },
+    "independently_rehashed_stored_items": [
+      "annex",
+      "final_response",
+      "transcript"
+    ],
+    "other_items": "The four derived byte sequences inner_mso, canonical_mso, issuer_sig_structure and device_authentication have identical recorded size/hash pairs across all 36 measurement and 2 preflight processes; their bytes were not independently reconstructed during this review.",
+    "annex_git_revisions_checked": [
+      "de10f77447a4e09563589bc71fdc94eb15bb2539",
+      "752b402e2d4e29407eb1e9ad81eeca5c085b235e",
+      "27c68b248260c7c0c0c4268b1cf9f44413241eb0"
+    ]
+  },
+  "experiments": {
+    "previous-main-vs-current": {
+      "rounds": 4,
+      "processes": 8,
+      "case_groups": 156,
+      "sample_rows": 156000,
+      "retained_observations_per_group": 1000,
+      "warmups_per_group": 100,
+      "numeric_checks_by_metric": {
+        "wall_ns": 624,
+        "thread_cpu_ns": 624,
+        "allocations": 624,
+        "requested_bytes": 624
+      },
+      "numeric_checks": 2496,
+      "summary_sha256": "dddaea1019482c481c79c80c30fa32bd16a54c203da71420d6061f90cb41eadf",
+      "runs": [
+        {
+          "round": 1,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "0ab6e4ba56cf21397e2a4229d06e00fe6cd3f555a660c5038fb33f3e53e2700a"
+        },
+        {
+          "round": 1,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 21,
+          "sample_rows": 21000,
+          "samples_sha256": "0c01e06cf4f93ed0e76e7bd4917573a8b82ea29f767e0abe7c48c5770ec511b3"
+        },
+        {
+          "round": 2,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 21,
+          "sample_rows": 21000,
+          "samples_sha256": "8e5cb3aae658dfdf7589fe3cf25fdcae58697aece364963d9b9763dd5fd9c9bd"
+        },
+        {
+          "round": 2,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "8a43153d0733aef12dcf1cbad7ad3ca5b05f14275b9bf68634333a6d8683595e"
+        },
+        {
+          "round": 3,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "78084b8bea97fb52a352dc093d9fb54adf7ad5ca59c59442c9c1c93b8d37822a"
+        },
+        {
+          "round": 3,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 21,
+          "sample_rows": 21000,
+          "samples_sha256": "977cd1c54daf0d1c47210884c63a3f9b457008179b2542ca01345073ddb24406"
+        },
+        {
+          "round": 4,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 21,
+          "sample_rows": 21000,
+          "samples_sha256": "60ca320aac88d6c0305d44c9304812cff39f66d97236a70ae3cb5888f601f32f"
+        },
+        {
+          "round": 4,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "962752b332aef5d01166aa07f7fa19a000bccba9d7bfb81e431cc6fefcef4843"
+        }
+      ],
+      "comparisons": {
+        "canonical_mso_encode": {
+          "baseline_case": "canonical_mso_encode",
+          "candidate_case": "canonical_mso_encode",
+          "cpu_ns": {
+            "p50": [
+              4096,
+              4406.5,
+              7.58056641
+            ],
+            "p95": [
+              5423.5,
+              4762,
+              -12.19692081
+            ],
+            "p99": [
+              44977.5,
+              29949.5,
+              -33.41226169
+            ],
+            "mean": [
+              5509.382,
+              5348.3215,
+              -2.92338596
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              3886,
+              4196.5,
+              7.99022131
+            ],
+            "p95": [
+              5182.5,
+              4497,
+              -13.22720695
+            ],
+            "p99": [
+              43806.5,
+              29188.5,
+              -33.36947713
+            ],
+            "mean": [
+              5465.561,
+              5065.705,
+              -7.31591871
+            ]
+          },
+          "allocation_calls": [
+            30,
+            30,
+            0
+          ],
+          "requested_bytes": [
+            6404,
+            6404,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "certificate_decode": {
+          "baseline_case": "certificate_decode",
+          "candidate_case": "certificate_decode",
+          "cpu_ns": {
+            "p50": [
+              4487,
+              2829.5,
+              -36.94004903
+            ],
+            "p95": [
+              5253,
+              2964.5,
+              -43.56558157
+            ],
+            "p99": [
+              60465,
+              3810.5,
+              -93.69800711
+            ],
+            "mean": [
+              6190.295,
+              2989.216,
+              -51.71125124
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              4257,
+              2629,
+              -38.24289406
+            ],
+            "p95": [
+              4922,
+              2759,
+              -43.94555059
+            ],
+            "p99": [
+              48092.5,
+              3340,
+              -93.05505016
+            ],
+            "mean": [
+              5833.079,
+              2755.884,
+              -52.75421437
+            ]
+          },
+          "allocation_calls": [
+            22,
+            22,
+            0
+          ],
+          "requested_bytes": [
+            2497,
+            2497,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "certificate_key_convert": {
+          "baseline_case": "certificate_key_convert",
+          "candidate_case": "certificate_key_convert",
+          "cpu_ns": {
+            "p50": [
+              446,
+              421,
+              -5.60538117
+            ],
+            "p95": [
+              496,
+              466,
+              -6.0483871
+            ],
+            "p99": [
+              711,
+              656,
+              -7.73558368
+            ],
+            "mean": [
+              599.065,
+              480.7005,
+              -19.75820654
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              255.5,
+              231,
+              -9.5890411
+            ],
+            "p95": [
+              301,
+              270,
+              -10.29900332
+            ],
+            "p99": [
+              370,
+              311,
+              -15.94594595
+            ],
+            "mean": [
+              377.2715,
+              257.7185,
+              -31.68885007
+            ]
+          },
+          "allocation_calls": [
+            3,
+            3,
+            0
+          ],
+          "requested_bytes": [
+            256,
+            256,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "coset_sig_structure_control": {
+          "baseline_case": "coset_sig_structure_control",
+          "candidate_case": "coset_sig_structure_control",
+          "cpu_ns": {
+            "p50": [
+              626,
+              555.5,
+              -11.26198083
+            ],
+            "p95": [
+              862,
+              616,
+              -28.53828306
+            ],
+            "p99": [
+              1171.5,
+              831,
+              -29.0653009
+            ],
+            "mean": [
+              766.813,
+              599.2415,
+              -21.8529811
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              431,
+              355.5,
+              -17.51740139
+            ],
+            "p95": [
+              581,
+              410.5,
+              -29.34595525
+            ],
+            "p99": [
+              771,
+              546,
+              -29.18287938
+            ],
+            "mean": [
+              532.678,
+              373.1685,
+              -29.94482595
+            ]
+          },
+          "allocation_calls": [
+            9,
+            9,
+            0
+          ],
+          "requested_bytes": [
+            2141,
+            2141,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "disclosure_verify": {
+          "baseline_case": "disclosure_verify",
+          "candidate_case": "disclosure_verify",
+          "cpu_ns": {
+            "p50": [
+              2664,
+              2674,
+              0.37537538
+            ],
+            "p95": [
+              2909.5,
+              2784,
+              -4.31345592
+            ],
+            "p99": [
+              17751.5,
+              5933.5,
+              -66.57465566
+            ],
+            "mean": [
+              3459.1265,
+              3561.2595,
+              2.9525662
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              2464,
+              2474,
+              0.40584416
+            ],
+            "p95": [
+              2609,
+              2558.5,
+              -1.93560751
+            ],
+            "p99": [
+              15603.5,
+              4617,
+              -70.41048483
+            ],
+            "mean": [
+              3217.3465,
+              3315.91,
+              3.0635028
+            ]
+          },
+          "allocation_calls": [
+            6,
+            6,
+            0
+          ],
+          "requested_bytes": [
+            564,
+            564,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "external_es256_sign_control": {
+          "baseline_case": "external_es256_sign_control",
+          "candidate_case": "external_es256_sign_control",
+          "cpu_ns": {
+            "p50": [
+              342961,
+              333807.5,
+              -2.66896236
+            ],
+            "p95": [
+              633038,
+              626924,
+              -0.9658188
+            ],
+            "p99": [
+              1195245.5,
+              1550295,
+              29.70515262
+            ],
+            "mean": [
+              412977.5415,
+              406189.381,
+              -1.64371178
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              342382,
+              333183,
+              -2.68676508
+            ],
+            "p95": [
+              640156.5,
+              622895,
+              -2.69645001
+            ],
+            "p99": [
+              1511696,
+              1646525,
+              8.91905515
+            ],
+            "mean": [
+              421392.207,
+              417849.673,
+              -0.84067383
+            ]
+          },
+          "allocation_calls": [
+            1,
+            1,
+            0
+          ],
+          "requested_bytes": [
+            64,
+            64,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "full_protocol_verify": {
+          "baseline_case": "full_protocol_verify",
+          "candidate_case": "full_protocol_verify",
+          "cpu_ns": {
+            "p50": [
+              762851.5,
+              747003,
+              -2.07753409
+            ],
+            "p95": [
+              1132191.5,
+              1122202.5,
+              -0.88227124
+            ],
+            "p99": [
+              1825169.5,
+              1950977,
+              6.89292145
+            ],
+            "mean": [
+              818812.584,
+              809556.289,
+              -1.13045344
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              760478,
+              746051.5,
+              -1.89703055
+            ],
+            "p95": [
+              1136778,
+              1115980,
+              -1.82955687
+            ],
+            "p99": [
+              1838071,
+              1948983.5,
+              6.03417931
+            ],
+            "mean": [
+              824310.11,
+              808166.855,
+              -1.95839585
+            ]
+          },
+          "allocation_calls": [
+            121,
+            83,
+            -31.40495868
+          ],
+          "requested_bytes": [
+            14591,
+            11734,
+            -19.58056336
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              771389,
+              754314,
+              739051,
+              789587
+            ],
+            "candidate": [
+              754494,
+              739512,
+              720704,
+              842525
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -2.48250797,
+            6.70451768
+          ]
+        },
+        "holder_es256_verify": {
+          "baseline_case": "holder_es256_verify",
+          "candidate_case": "holder_es256_verify",
+          "cpu_ns": {
+            "p50": [
+              344303,
+              345534.5,
+              0.35767914
+            ],
+            "p95": [
+              540059.5,
+              562187.5,
+              4.09732631
+            ],
+            "p99": [
+              842395,
+              926455.5,
+              9.97875106
+            ],
+            "mean": [
+              393656.405,
+              392297.333,
+              -0.34524321
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              343568.5,
+              344680,
+              0.32351627
+            ],
+            "p95": [
+              538728,
+              561923,
+              4.30551224
+            ],
+            "p99": [
+              844194.5,
+              925414,
+              9.62094636
+            ],
+            "mean": [
+              394458.333,
+              391633.168,
+              -0.7162138
+            ]
+          },
+          "allocation_calls": [
+            5,
+            2,
+            -60
+          ],
+          "requested_bytes": [
+            575,
+            89,
+            -84.52173913
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuance_complete": {
+          "baseline_case": "issuance_complete",
+          "candidate_case": "issuance_complete",
+          "cpu_ns": {
+            "p50": [
+              718060,
+              729086.5,
+              1.53559591
+            ],
+            "p95": [
+              1062778,
+              1085167,
+              2.1066488
+            ],
+            "p99": [
+              1887810.5,
+              2463776,
+              30.50970953
+            ],
+            "mean": [
+              788302.8525,
+              831853.264,
+              5.5245787
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              716867,
+              727768.5,
+              1.52071444
+            ],
+            "p95": [
+              1057867,
+              1083399.5,
+              2.41358318
+            ],
+            "p99": [
+              1922727.5,
+              2460919.5,
+              27.99106998
+            ],
+            "mean": [
+              789518.8295,
+              831054.9245,
+              5.26093786
+            ]
+          },
+          "allocation_calls": [
+            112,
+            67,
+            -40.17857143
+          ],
+          "requested_bytes": [
+            12989,
+            7563,
+            -41.77380861
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              687855,
+              748265,
+              687074,
+              764208
+            ],
+            "candidate": [
+              695377,
+              749827,
+              735326,
+              722847
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -5.41226996,
+            7.02282432
+          ]
+        },
+        "issuance_finish": {
+          "baseline_case": "issuance_finish",
+          "candidate_case": "issuance_finish",
+          "cpu_ns": {
+            "p50": [
+              356952,
+              357087.5,
+              0.03796029
+            ],
+            "p95": [
+              638502,
+              610364,
+              -4.40687735
+            ],
+            "p99": [
+              1170859.5,
+              1146798.5,
+              -2.0549861
+            ],
+            "mean": [
+              414390.658,
+              411670.3895,
+              -0.65645025
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              355657,
+              355962.5,
+              0.08589737
+            ],
+            "p95": [
+              643216,
+              614133,
+              -4.52149822
+            ],
+            "p99": [
+              1492001.5,
+              1144929.5,
+              -23.262175
+            ],
+            "mean": [
+              426582.8455,
+              410914.548,
+              -3.6729788
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuance_prepare": {
+          "baseline_case": "issuance_prepare",
+          "candidate_case": "issuance_prepare",
+          "cpu_ns": {
+            "p50": [
+              10796,
+              8462,
+              -21.61911819
+            ],
+            "p95": [
+              16449,
+              11272,
+              -31.47303787
+            ],
+            "p99": [
+              71902,
+              73088.5,
+              1.65016272
+            ],
+            "mean": [
+              13446.822,
+              10914.375,
+              -18.83305215
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              10521,
+              8202.5,
+              -22.03687862
+            ],
+            "p95": [
+              15764,
+              10857,
+              -31.12788632
+            ],
+            "p99": [
+              66700.5,
+              72654.5,
+              8.92646982
+            ],
+            "mean": [
+              13123.869,
+              10525.1575,
+              -19.80141298
+            ]
+          },
+          "allocation_calls": [
+            98,
+            53,
+            -45.91836735
+          ],
+          "requested_bytes": [
+            11596,
+            6170,
+            -46.79199724
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": false,
+          "allocation_ranges": {
+            "allocations": {
+              "baseline": [
+                98,
+                98
+              ],
+              "candidate": [
+                53,
+                53
+              ]
+            },
+            "requested_bytes": {
+              "baseline": [
+                11590,
+                11596
+              ],
+              "candidate": [
+                6170,
+                6170
+              ]
+            }
+          }
+        },
+        "issuer_es256_verify": {
+          "baseline_case": "issuer_es256_verify",
+          "candidate_case": "issuer_es256_verify",
+          "cpu_ns": {
+            "p50": [
+              354598,
+              347918.5,
+              -1.88368237
+            ],
+            "p95": [
+              585292,
+              615757.5,
+              5.20517964
+            ],
+            "p99": [
+              899175.5,
+              1071411.5,
+              19.15488133
+            ],
+            "mean": [
+              398371.822,
+              402853.723,
+              1.12505472
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              353949.5,
+              347354.5,
+              -1.86326015
+            ],
+            "p95": [
+              584932.5,
+              615948.5,
+              5.30249217
+            ],
+            "p99": [
+              897404.5,
+              1056021.5,
+              17.67508409
+            ],
+            "mean": [
+              397664.2265,
+              402104.7375,
+              1.11664834
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuer_signed_encode": {
+          "baseline_case": "issuer_signed_encode",
+          "candidate_case": "issuer_signed_encode",
+          "cpu_ns": {
+            "p50": [
+              4222,
+              3966,
+              -6.06347703
+            ],
+            "p95": [
+              5323,
+              5553,
+              4.32087169
+            ],
+            "p99": [
+              20250.5,
+              26755,
+              32.12019456
+            ],
+            "mean": [
+              5041.7095,
+              4873.2995,
+              -3.34033526
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              4006,
+              3760,
+              -6.14078882
+            ],
+            "p95": [
+              4797,
+              5202.5,
+              8.45319992
+            ],
+            "p99": [
+              19829.5,
+              17321.5,
+              -12.64782269
+            ],
+            "mean": [
+              4809.5425,
+              4985.484,
+              3.65817539
+            ]
+          },
+          "allocation_calls": [
+            31,
+            25,
+            -19.35483871
+          ],
+          "requested_bytes": [
+            10837,
+            9291,
+            -14.26594076
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "measurement_control": {
+          "baseline_case": "measurement_control",
+          "candidate_case": "measurement_control",
+          "cpu_ns": {
+            "p50": [
+              220,
+              220,
+              0
+            ],
+            "p95": [
+              275.5,
+              225.5,
+              -18.14882033
+            ],
+            "p99": [
+              425.5,
+              280.5,
+              -34.07755582
+            ],
+            "mean": [
+              331.556,
+              280.473,
+              -15.40705039
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              30,
+              30,
+              0
+            ],
+            "p95": [
+              40,
+              40,
+              0
+            ],
+            "p99": [
+              40,
+              40,
+              0
+            ],
+            "mean": [
+              31.199,
+              30.7215,
+              -1.53049777
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "mso_decode": {
+          "baseline_case": "mso_decode",
+          "candidate_case": "mso_decode",
+          "cpu_ns": {
+            "p50": [
+              4692,
+              4722,
+              0.63938619
+            ],
+            "p95": [
+              5353,
+              6119,
+              14.30973286
+            ],
+            "p99": [
+              40129.5,
+              29003.5,
+              -27.72523954
+            ],
+            "mean": [
+              6451.2685,
+              5646.2355,
+              -12.47867764
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              4487,
+              4512,
+              0.55716514
+            ],
+            "p95": [
+              5008,
+              5483.5,
+              9.49480831
+            ],
+            "p99": [
+              35423.5,
+              28051.5,
+              -20.81104352
+            ],
+            "mean": [
+              6197.4835,
+              5374.6895,
+              -13.27625963
+            ]
+          },
+          "allocation_calls": [
+            59,
+            59,
+            0
+          ],
+          "requested_bytes": [
+            4528,
+            4528,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "mso_parse": {
+          "baseline_case": "mso_parse",
+          "candidate_case": "mso_parse",
+          "cpu_ns": {
+            "p50": [
+              5934,
+              6955.5,
+              17.21435794
+            ],
+            "p95": [
+              8578,
+              7972,
+              -7.06458382
+            ],
+            "p99": [
+              57776,
+              35142.5,
+              -39.17457076
+            ],
+            "mean": [
+              7843.352,
+              8055.4485,
+              2.70415634
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              5709,
+              6730,
+              17.88404274
+            ],
+            "p95": [
+              8122.5,
+              7581,
+              -6.66666667
+            ],
+            "p99": [
+              50386,
+              32614,
+              -35.27170246
+            ],
+            "mean": [
+              7553.982,
+              8002.5335,
+              5.93794769
+            ]
+          },
+          "allocation_calls": [
+            64,
+            43,
+            -32.8125
+          ],
+          "requested_bytes": [
+            6196,
+            4577,
+            -26.12976114
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              5999,
+              5889,
+              5919,
+              5949
+            ],
+            "candidate": [
+              6950,
+              6990,
+              6951,
+              6960
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            15.85264211,
+            18.69587366
+          ]
+        },
+        "redirect_transcript_validate": {
+          "baseline_case": "redirect_transcript_validate",
+          "candidate_case": "redirect_transcript_validate",
+          "cpu_ns": {
+            "p50": [
+              411,
+              431,
+              4.86618005
+            ],
+            "p95": [
+              436,
+              451,
+              3.44036697
+            ],
+            "p99": [
+              600.5,
+              516,
+              -14.07160699
+            ],
+            "mean": [
+              534.4175,
+              460.888,
+              -13.75881216
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              220,
+              240,
+              9.09090909
+            ],
+            "p95": [
+              235.5,
+              260,
+              10.40339703
+            ],
+            "p99": [
+              255.5,
+              261,
+              2.15264188
+            ],
+            "mean": [
+              227.571,
+              257.1125,
+              12.98122344
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "response_parse": {
+          "baseline_case": "response_parse",
+          "candidate_case": "response_parse",
+          "cpu_ns": {
+            "p50": [
+              14491,
+              14546,
+              0.37954593
+            ],
+            "p95": [
+              41482,
+              22673.5,
+              -45.34135288
+            ],
+            "p99": [
+              124365.5,
+              107860.5,
+              -13.27136545
+            ],
+            "mean": [
+              19480.6895,
+              17897.0565,
+              -8.12924512
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              14246.5,
+              14306.5,
+              0.42115607
+            ],
+            "p95": [
+              40251,
+              22233,
+              -44.76410524
+            ],
+            "p99": [
+              123566.5,
+              107082,
+              -13.34058988
+            ],
+            "mean": [
+              19108.6955,
+              17590.6175,
+              -7.94443556
+            ]
+          },
+          "allocation_calls": [
+            102,
+            100,
+            -1.96078431
+          ],
+          "requested_bytes": [
+            12910,
+            13570,
+            5.11231603
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        }
+      },
+      "candidate_only_cases": {
+        "full_protocol_verify_borrowed": {
+          "wall_ns": {
+            "p50": 762599.5,
+            "p95": 1254744,
+            "p99": 2440904.5,
+            "mean": 855732.8205
+          },
+          "thread_cpu_ns": {
+            "p50": 763643,
+            "p95": 1244904.5,
+            "p99": 2366957.5,
+            "mean": 851540.093
+          },
+          "allocations": {
+            "p50": 51,
+            "p95": 51,
+            "p99": 51,
+            "mean": 51
+          },
+          "requested_bytes": {
+            "p50": 6714,
+            "p95": 6714,
+            "p99": 6714,
+            "mean": 6714
+          }
+        },
+        "mso_parse_borrowed": {
+          "wall_ns": {
+            "p50": 5463,
+            "p95": 5944.5,
+            "p99": 30631,
+            "mean": 6646.565
+          },
+          "thread_cpu_ns": {
+            "p50": 5668.5,
+            "p95": 6194,
+            "p99": 32949.5,
+            "mean": 6951.662
+          },
+          "allocations": {
+            "p50": 16,
+            "p95": 16,
+            "p99": 16,
+            "mean": 16
+          },
+          "requested_bytes": {
+            "p50": 2520,
+            "p95": 2520,
+            "p99": 2520,
+            "mean": 2520
+          }
+        },
+        "response_parse_borrowed": {
+          "wall_ns": {
+            "p50": 11222,
+            "p95": 12213.5,
+            "p99": 72734,
+            "mean": 12921.7495
+          },
+          "thread_cpu_ns": {
+            "p50": 11432,
+            "p95": 12633.5,
+            "p99": 75492.5,
+            "mean": 13342.569
+          },
+          "allocations": {
+            "p50": 41,
+            "p95": 41,
+            "p99": 41,
+            "mean": 41
+          },
+          "requested_bytes": {
+            "p50": 5396,
+            "p95": 5396,
+            "p99": 5396,
+            "mean": 5396
+          }
+        }
+      },
+      "errors": []
+    },
+    "unchanged-previous-main": {
+      "rounds": 2,
+      "processes": 4,
+      "case_groups": 72,
+      "sample_rows": 72000,
+      "retained_observations_per_group": 1000,
+      "warmups_per_group": 100,
+      "numeric_checks_by_metric": {
+        "wall_ns": 288,
+        "thread_cpu_ns": 288,
+        "allocations": 288,
+        "requested_bytes": 288
+      },
+      "numeric_checks": 1152,
+      "summary_sha256": "c0dd59c67cc5830c76fb9f1a81c1795d47ced013cb2a0a0943fd0e701e673fcf",
+      "runs": [
+        {
+          "round": 1,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "e4083ec2d778967f01f2672ca5234b10af9dfa8d839afe545cf685a0d6a936d5"
+        },
+        {
+          "round": 1,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "ec858df6e0fa74625bea93192eb337d303f0cd22d08390681dc7b57c703a778a"
+        },
+        {
+          "round": 2,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "bee000ad2b4c96f9d2859ca7246abff241c279f570b76190806cc72b709e144a"
+        },
+        {
+          "round": 2,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 18,
+          "sample_rows": 18000,
+          "samples_sha256": "17c8c5ead1e473ed2fc13425128a2c664c479af97e6cc956b4cd2b73fd47d1e4"
+        }
+      ],
+      "comparisons": {
+        "canonical_mso_encode": {
+          "baseline_case": "canonical_mso_encode",
+          "candidate_case": "canonical_mso_encode",
+          "cpu_ns": {
+            "p50": [
+              4131.5,
+              4126,
+              -0.13312356
+            ],
+            "p95": [
+              5808.5,
+              4592,
+              -20.94344495
+            ],
+            "p99": [
+              52298,
+              26484.5,
+              -49.35848407
+            ],
+            "mean": [
+              6773.892,
+              4998.719,
+              -26.20610131
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              3926,
+              3921,
+              -0.12735609
+            ],
+            "p95": [
+              5443.5,
+              4336.5,
+              -20.33618077
+            ],
+            "p99": [
+              48953.5,
+              25834,
+              -47.22747097
+            ],
+            "mean": [
+              6520.4015,
+              4727.489,
+              -27.49696472
+            ]
+          },
+          "allocation_calls": [
+            30,
+            30,
+            0
+          ],
+          "requested_bytes": [
+            6404,
+            6404,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "certificate_decode": {
+          "baseline_case": "certificate_decode",
+          "candidate_case": "certificate_decode",
+          "cpu_ns": {
+            "p50": [
+              4497,
+              4507,
+              0.22237047
+            ],
+            "p95": [
+              5833.5,
+              4927.5,
+              -15.53098483
+            ],
+            "p99": [
+              49914.5,
+              18452.5,
+              -63.03178435
+            ],
+            "mean": [
+              6235.743,
+              5068.787,
+              -18.71398485
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              4271.5,
+              4286.5,
+              0.3511647
+            ],
+            "p95": [
+              5478.5,
+              4637,
+              -15.36004381
+            ],
+            "p99": [
+              45959,
+              17766.5,
+              -61.34271851
+            ],
+            "mean": [
+              5898.3175,
+              4789.576,
+              -18.79758931
+            ]
+          },
+          "allocation_calls": [
+            22,
+            22,
+            0
+          ],
+          "requested_bytes": [
+            2497,
+            2497,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "certificate_key_convert": {
+          "baseline_case": "certificate_key_convert",
+          "candidate_case": "certificate_key_convert",
+          "cpu_ns": {
+            "p50": [
+              446,
+              441,
+              -1.12107623
+            ],
+            "p95": [
+              555.5,
+              481,
+              -13.41134113
+            ],
+            "p99": [
+              786.5,
+              751.5,
+              -4.45009536
+            ],
+            "mean": [
+              577.428,
+              574.528,
+              -0.50222712
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              255.5,
+              255.5,
+              0
+            ],
+            "p95": [
+              315.5,
+              281,
+              -10.93502377
+            ],
+            "p99": [
+              410,
+              415.5,
+              1.34146341
+            ],
+            "mean": [
+              371.1625,
+              275.03,
+              -25.90038056
+            ]
+          },
+          "allocation_calls": [
+            3,
+            3,
+            0
+          ],
+          "requested_bytes": [
+            256,
+            256,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "coset_sig_structure_control": {
+          "baseline_case": "coset_sig_structure_control",
+          "candidate_case": "coset_sig_structure_control",
+          "cpu_ns": {
+            "p50": [
+              651,
+              631,
+              -3.07219662
+            ],
+            "p95": [
+              891.5,
+              711,
+              -20.2467751
+            ],
+            "p99": [
+              2283,
+              1116.5,
+              -51.09505037
+            ],
+            "mean": [
+              847.2445,
+              801.5785,
+              -5.38994352
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              451,
+              435.5,
+              -3.4368071
+            ],
+            "p95": [
+              601.5,
+              496,
+              -17.53948462
+            ],
+            "p99": [
+              851,
+              776,
+              -8.81316099
+            ],
+            "mean": [
+              596.5655,
+              598.816,
+              0.37724273
+            ]
+          },
+          "allocation_calls": [
+            9,
+            9,
+            0
+          ],
+          "requested_bytes": [
+            2141,
+            2141,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "disclosure_verify": {
+          "baseline_case": "disclosure_verify",
+          "candidate_case": "disclosure_verify",
+          "cpu_ns": {
+            "p50": [
+              2674,
+              2669,
+              -0.18698579
+            ],
+            "p95": [
+              3470,
+              3034.5,
+              -12.55043228
+            ],
+            "p99": [
+              16935,
+              4912,
+              -70.99498081
+            ],
+            "mean": [
+              3525.473,
+              3131.9455,
+              -11.16240289
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              2474,
+              2469,
+              -0.20210186
+            ],
+            "p95": [
+              3014.5,
+              2769,
+              -8.14397081
+            ],
+            "p99": [
+              16209.5,
+              4481.5,
+              -72.35263272
+            ],
+            "mean": [
+              3190.641,
+              2896.081,
+              -9.23200072
+            ]
+          },
+          "allocation_calls": [
+            6,
+            6,
+            0
+          ],
+          "requested_bytes": [
+            564,
+            564,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "external_es256_sign_control": {
+          "baseline_case": "external_es256_sign_control",
+          "candidate_case": "external_es256_sign_control",
+          "cpu_ns": {
+            "p50": [
+              357943.5,
+              315890.5,
+              -11.74850221
+            ],
+            "p95": [
+              755610.5,
+              459259,
+              -39.22014054
+            ],
+            "p99": [
+              1631521,
+              631020.5,
+              -61.32317635
+            ],
+            "mean": [
+              432697.405,
+              348077.5955,
+              -19.55634781
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              356623,
+              315431,
+              -11.55057301
+            ],
+            "p95": [
+              754248,
+              458041.5,
+              -39.27176472
+            ],
+            "p99": [
+              1617331,
+              630086,
+              -61.04161733
+            ],
+            "mean": [
+              432241.2275,
+              347505.6435,
+              -19.60377183
+            ]
+          },
+          "allocation_calls": [
+            1,
+            1,
+            0
+          ],
+          "requested_bytes": [
+            64,
+            64,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "full_protocol_verify": {
+          "baseline_case": "full_protocol_verify",
+          "candidate_case": "full_protocol_verify",
+          "cpu_ns": {
+            "p50": [
+              761434.5,
+              785881,
+              3.21058476
+            ],
+            "p95": [
+              1338429.5,
+              1409449.5,
+              5.30621897
+            ],
+            "p99": [
+              2075958,
+              2377642.5,
+              14.53230268
+            ],
+            "mean": [
+              854798.114,
+              884014.213,
+              3.41789465
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              760537.5,
+              784218.5,
+              3.11371892
+            ],
+            "p95": [
+              1336733,
+              1418986.5,
+              6.15332306
+            ],
+            "p99": [
+              2079959,
+              2421940.5,
+              16.44174236
+            ],
+            "mean": [
+              868606.563,
+              884098.687,
+              1.78356055
+            ]
+          },
+          "allocation_calls": [
+            121,
+            121,
+            0
+          ],
+          "requested_bytes": [
+            14591,
+            14591,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              732261,
+              790608
+            ],
+            "candidate": [
+              790858,
+              780904
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -1.22740979,
+            8.0022014
+          ]
+        },
+        "holder_es256_verify": {
+          "baseline_case": "holder_es256_verify",
+          "candidate_case": "holder_es256_verify",
+          "cpu_ns": {
+            "p50": [
+              384688.5,
+              355154,
+              -7.67751051
+            ],
+            "p95": [
+              892414.5,
+              568572.5,
+              -36.28829428
+            ],
+            "p99": [
+              1809797,
+              816241.5,
+              -54.89872621
+            ],
+            "mean": [
+              475774.913,
+              414240.2995,
+              -12.93355573
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              383328.5,
+              354250,
+              -7.5857913
+            ],
+            "p95": [
+              882837,
+              567862,
+              -35.67759394
+            ],
+            "p99": [
+              1858255,
+              813878.5,
+              -56.20200134
+            ],
+            "mean": [
+              479693.421,
+              413511.2215,
+              -13.79677031
+            ]
+          },
+          "allocation_calls": [
+            5,
+            5,
+            0
+          ],
+          "requested_bytes": [
+            575,
+            575,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuance_complete": {
+          "baseline_case": "issuance_complete",
+          "candidate_case": "issuance_complete",
+          "cpu_ns": {
+            "p50": [
+              785054.5,
+              748881,
+              -4.60776927
+            ],
+            "p95": [
+              1615116.5,
+              1081241,
+              -33.05492204
+            ],
+            "p99": [
+              2815440,
+              1894137.5,
+              -32.72321555
+            ],
+            "mean": [
+              906127.4445,
+              799661.818,
+              -11.74952013
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              783637.5,
+              747443.5,
+              -4.6187172
+            ],
+            "p95": [
+              1617471,
+              1082749.5,
+              -33.05910894
+            ],
+            "p99": [
+              2831103,
+              1892000.5,
+              -33.17090547
+            ],
+            "mean": [
+              910686.6535,
+              798401.2225,
+              -12.32975476
+            ]
+          },
+          "allocation_calls": [
+            112,
+            112,
+            0
+          ],
+          "requested_bytes": [
+            12989,
+            12989,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              784499,
+              785610
+            ],
+            "candidate": [
+              750739,
+              747023
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -4.91172465,
+            -4.30338343
+          ]
+        },
+        "issuance_finish": {
+          "baseline_case": "issuance_finish",
+          "candidate_case": "issuance_finish",
+          "cpu_ns": {
+            "p50": [
+              397522.5,
+              355154,
+              -10.65813885
+            ],
+            "p95": [
+              871027.5,
+              574065.5,
+              -34.09329786
+            ],
+            "p99": [
+              1929079,
+              903191,
+              -53.18019635
+            ],
+            "mean": [
+              482398.408,
+              402275.5865,
+              -16.60926325
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              395882.5,
+              354244.5,
+              -10.51776727
+            ],
+            "p95": [
+              858205.5,
+              572053.5,
+              -33.34306294
+            ],
+            "p99": [
+              1927664,
+              962993.5,
+              -50.04349824
+            ],
+            "mean": [
+              482729.2905,
+              402359.1125,
+              -16.64911982
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuance_prepare": {
+          "baseline_case": "issuance_prepare",
+          "candidate_case": "issuance_prepare",
+          "cpu_ns": {
+            "p50": [
+              10826.5,
+              10731,
+              -0.88209486
+            ],
+            "p95": [
+              30856,
+              20055,
+              -35.00453721
+            ],
+            "p99": [
+              220844,
+              115502.5,
+              -47.69950734
+            ],
+            "mean": [
+              19946.1785,
+              14555.0735,
+              -27.02826007
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              10551,
+              10465.5,
+              -0.81034973
+            ],
+            "p95": [
+              27716.5,
+              18377.5,
+              -33.69473058
+            ],
+            "p99": [
+              219711.5,
+              114778.5,
+              -47.75944819
+            ],
+            "mean": [
+              19476.621,
+              14239.848,
+              -26.88748218
+            ]
+          },
+          "allocation_calls": [
+            98,
+            98,
+            0
+          ],
+          "requested_bytes": [
+            11596,
+            11596,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuer_es256_verify": {
+          "baseline_case": "issuer_es256_verify",
+          "candidate_case": "issuer_es256_verify",
+          "cpu_ns": {
+            "p50": [
+              372915.5,
+              353327,
+              -5.25279856
+            ],
+            "p95": [
+              763287.5,
+              652241.5,
+              -14.54838446
+            ],
+            "p99": [
+              2232196,
+              1743153,
+              -21.9086048
+            ],
+            "mean": [
+              458120.9345,
+              426680.787,
+              -6.8628489
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              371981,
+              352557,
+              -5.22177208
+            ],
+            "p95": [
+              768795,
+              643781.5,
+              -16.26096684
+            ],
+            "p99": [
+              2230937,
+              1741734,
+              -21.92814051
+            ],
+            "mean": [
+              457617.143,
+              424729.317,
+              -7.18675568
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "issuer_signed_encode": {
+          "baseline_case": "issuer_signed_encode",
+          "candidate_case": "issuer_signed_encode",
+          "cpu_ns": {
+            "p50": [
+              4271.5,
+              4201.5,
+              -1.63876858
+            ],
+            "p95": [
+              6124,
+              4722,
+              -22.89353364
+            ],
+            "p99": [
+              45232,
+              20325.5,
+              -55.06389282
+            ],
+            "mean": [
+              5578.837,
+              4891.712,
+              -12.31663517
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              4031.5,
+              3991,
+              -1.00458886
+            ],
+            "p95": [
+              5758.5,
+              4456.5,
+              -22.6100547
+            ],
+            "p99": [
+              43896,
+              18002.5,
+              -58.9882905
+            ],
+            "mean": [
+              5258.9585,
+              10503.613,
+              99.72800698
+            ]
+          },
+          "allocation_calls": [
+            31,
+            31,
+            0
+          ],
+          "requested_bytes": [
+            10837,
+            10837,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "measurement_control": {
+          "baseline_case": "measurement_control",
+          "candidate_case": "measurement_control",
+          "cpu_ns": {
+            "p50": [
+              220,
+              220,
+              0
+            ],
+            "p95": [
+              265.5,
+              230.5,
+              -13.1826742
+            ],
+            "p99": [
+              315.5,
+              275.5,
+              -12.67828843
+            ],
+            "mean": [
+              245.357,
+              226.039,
+              -7.87342525
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              30,
+              30,
+              0
+            ],
+            "p95": [
+              40,
+              40,
+              0
+            ],
+            "p99": [
+              40,
+              40,
+              0
+            ],
+            "mean": [
+              31.0455,
+              30.6665,
+              -1.22078884
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "mso_decode": {
+          "baseline_case": "mso_decode",
+          "candidate_case": "mso_decode",
+          "cpu_ns": {
+            "p50": [
+              4707,
+              4732,
+              0.53112386
+            ],
+            "p95": [
+              8608,
+              5328,
+              -38.10408922
+            ],
+            "p99": [
+              32118.5,
+              38201.5,
+              18.93924062
+            ],
+            "mean": [
+              5901.2275,
+              5827.698,
+              -1.24600348
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              4501.5,
+              4526.5,
+              0.55537043
+            ],
+            "p95": [
+              8107.5,
+              5017.5,
+              -38.11285846
+            ],
+            "p99": [
+              31592,
+              35819,
+              13.37996961
+            ],
+            "mean": [
+              5635.08,
+              5605.7425,
+              -0.5206226
+            ]
+          },
+          "allocation_calls": [
+            59,
+            59,
+            0
+          ],
+          "requested_bytes": [
+            4528,
+            4528,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "mso_parse": {
+          "baseline_case": "mso_parse",
+          "candidate_case": "mso_parse",
+          "cpu_ns": {
+            "p50": [
+              5914,
+              5889,
+              -0.42272574
+            ],
+            "p95": [
+              6990.5,
+              6234.5,
+              -10.81467706
+            ],
+            "p99": [
+              59433,
+              26074,
+              -56.12875002
+            ],
+            "mean": [
+              7870.617,
+              6660.8885,
+              -15.37018635
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              5693.5,
+              5668.5,
+              -0.43909722
+            ],
+            "p95": [
+              6585,
+              6004,
+              -8.82308276
+            ],
+            "p99": [
+              57632,
+              25748.5,
+              -55.32256385
+            ],
+            "mean": [
+              7525.07,
+              6423.7125,
+              -14.63584392
+            ]
+          },
+          "allocation_calls": [
+            64,
+            64,
+            0
+          ],
+          "requested_bytes": [
+            6196,
+            6196,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              5879,
+              5949
+            ],
+            "candidate": [
+              5879,
+              5899
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -0.84047739,
+            0
+          ]
+        },
+        "redirect_transcript_validate": {
+          "baseline_case": "redirect_transcript_validate",
+          "candidate_case": "redirect_transcript_validate",
+          "cpu_ns": {
+            "p50": [
+              411,
+              411,
+              0
+            ],
+            "p95": [
+              426,
+              455.5,
+              6.92488263
+            ],
+            "p99": [
+              466,
+              605.5,
+              29.93562232
+            ],
+            "mean": [
+              528.5715,
+              614.8895,
+              16.33043023
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              220.5,
+              220.5,
+              0
+            ],
+            "p95": [
+              231,
+              236,
+              2.16450216
+            ],
+            "p99": [
+              241,
+              280.5,
+              16.39004149
+            ],
+            "mean": [
+              269.1845,
+              305.476,
+              13.48201698
+            ]
+          },
+          "allocation_calls": [
+            0,
+            0,
+            0
+          ],
+          "requested_bytes": [
+            0,
+            0,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        },
+        "response_parse": {
+          "baseline_case": "response_parse",
+          "candidate_case": "response_parse",
+          "cpu_ns": {
+            "p50": [
+              14546.5,
+              14582,
+              0.24404496
+            ],
+            "p95": [
+              34031,
+              29474,
+              -13.39073198
+            ],
+            "p99": [
+              111801.5,
+              104455.5,
+              -6.57057374
+            ],
+            "mean": [
+              20368.554,
+              18116.087,
+              -11.05855133
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              14292,
+              14331.5,
+              0.27637839
+            ],
+            "p95": [
+              32949.5,
+              28618.5,
+              -13.14435727
+            ],
+            "p99": [
+              111107,
+              103796.5,
+              -6.57969345
+            ],
+            "mean": [
+              19997.883,
+              17829.6295,
+              -10.84241517
+            ]
+          },
+          "allocation_calls": [
+            102,
+            102,
+            0
+          ],
+          "requested_bytes": [
+            12910,
+            12910,
+            0
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true
+        }
+      },
+      "errors": []
+    },
+    "owned-vs-borrowed-response_parse": {
+      "rounds": 4,
+      "processes": 8,
+      "case_groups": 8,
+      "sample_rows": 8000,
+      "retained_observations_per_group": 1000,
+      "warmups_per_group": 100,
+      "numeric_checks_by_metric": {
+        "wall_ns": 32,
+        "thread_cpu_ns": 32,
+        "allocations": 32,
+        "requested_bytes": 32
+      },
+      "numeric_checks": 128,
+      "summary_sha256": "1ce3ec988b3d0782ca0325d85deeafd0debdbbc47777b9b122946575cf4942a3",
+      "runs": [
+        {
+          "round": 1,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "176daff036bb9dd9d28532dcab7ccd4930ce1ecd325696c2cdbffcd30fd53ae3"
+        },
+        {
+          "round": 1,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "cda677fd7e86b4d980421beb0b9fec906488f7843429a15615605e30efb133ac"
+        },
+        {
+          "round": 2,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "6b3e631dd3ef54c1469d711fe5d239c9bb333b39d0fa55226cec5aa724428e9c"
+        },
+        {
+          "round": 2,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "9756b99c39c9042828f3e132b42bc8590663f02366d0cf99c6ded6efb0168732"
+        },
+        {
+          "round": 3,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "73f92e5dde789a8b9ad2f104c9f4dcd284259c43967e3a4c3a8b44c3311e841a"
+        },
+        {
+          "round": 3,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "737c37e8939fe02286c96cf871bbe05143ff77d8f2fb7a7580ed90ae08b2b83a"
+        },
+        {
+          "round": 4,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "b3f6a267c9d63b13107e03af490a2e5f02a0f70def5a83903c0cd4f5bb8e49dc"
+        },
+        {
+          "round": 4,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "8df8683824f0aba97a59d6c6a2f98bd326cb8eacc19c75626b669c32e42f0ad1"
+        }
+      ],
+      "comparisons": {
+        "response_parse": {
+          "baseline_case": "response_parse",
+          "candidate_case": "response_parse_borrowed",
+          "cpu_ns": {
+            "p50": [
+              14591.5,
+              11682.5,
+              -19.93626426
+            ],
+            "p95": [
+              22944.5,
+              20310,
+              -11.48205452
+            ],
+            "p99": [
+              102227.5,
+              85923.5,
+              -15.94874178
+            ],
+            "mean": [
+              18594.2285,
+              17377.175,
+              -6.54532937
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              14346.5,
+              11457.5,
+              -20.13731572
+            ],
+            "p95": [
+              22328.5,
+              19825,
+              -11.212128
+            ],
+            "p99": [
+              96235,
+              84607,
+              -12.08292201
+            ],
+            "mean": [
+              17841.489,
+              18089.612,
+              1.39070792
+            ]
+          },
+          "allocation_calls": [
+            100,
+            41,
+            -59
+          ],
+          "requested_bytes": [
+            13570,
+            5396,
+            -60.2358143
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              14722,
+              14532,
+              14651,
+              14482
+            ],
+            "candidate": [
+              11808,
+              18308,
+              11497,
+              11557
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -21.52754078,
+            25.98403523
+          ]
+        }
+      },
+      "errors": []
+    },
+    "owned-vs-borrowed-mso_parse": {
+      "rounds": 4,
+      "processes": 8,
+      "case_groups": 8,
+      "sample_rows": 8000,
+      "retained_observations_per_group": 1000,
+      "warmups_per_group": 100,
+      "numeric_checks_by_metric": {
+        "wall_ns": 32,
+        "thread_cpu_ns": 32,
+        "allocations": 32,
+        "requested_bytes": 32
+      },
+      "numeric_checks": 128,
+      "summary_sha256": "b4e485e1af5e5e7eb15942a02576d19c002c56694d2df5e212c468e9822a97d8",
+      "runs": [
+        {
+          "round": 1,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "19236eb37711d43ad75acabaad3b61681746e6d097c13982bafd24e90cda8d88"
+        },
+        {
+          "round": 1,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "f04e1efe8ab8c6b6df0c701152898aa52fb81855f11ac67e729ccbca99400c11"
+        },
+        {
+          "round": 2,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "0f0659a010dc9818cb5d10434408c2ff027631af3735fb6a03419f6ace7f120a"
+        },
+        {
+          "round": 2,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "76468be50fe8cb8fd72ee6fb89cb52917f0240c3bc5c54090ce5c9e6021fcec4"
+        },
+        {
+          "round": 3,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "a7797a6e0cc62a96173c5b3eebf0957be651138a6ccc87f78c0a96ccd00a6a38"
+        },
+        {
+          "round": 3,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "6b17f1d139d7a63029e7899c1ac70adf3183648248fc76afc9840c48a5acfff3"
+        },
+        {
+          "round": 4,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "aca846485b58596ceb4db4eb3d4adb3bbea3c8aebc0a15be19e900ca4df68551"
+        },
+        {
+          "round": 4,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "79a0d6791e23c76a607de2dc381e6ac01d8fa289b08d782a1ceb1e41633698d8"
+        }
+      ],
+      "comparisons": {
+        "mso_parse": {
+          "baseline_case": "mso_parse",
+          "candidate_case": "mso_parse_borrowed",
+          "cpu_ns": {
+            "p50": [
+              7005,
+              5683,
+              -18.87223412
+            ],
+            "p95": [
+              11362,
+              6229.5,
+              -45.17250484
+            ],
+            "p99": [
+              64721.5,
+              24907,
+              -61.51665212
+            ],
+            "mean": [
+              8927.843,
+              6472.324,
+              -27.50405669
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              6775,
+              5468,
+              -19.29151292
+            ],
+            "p95": [
+              10746.5,
+              5934,
+              -44.78202205
+            ],
+            "p99": [
+              64087,
+              24552.5,
+              -61.68879804
+            ],
+            "mean": [
+              8667.669,
+              6230.873,
+              -28.11362547
+            ]
+          },
+          "allocation_calls": [
+            43,
+            16,
+            -62.79069767
+          ],
+          "requested_bytes": [
+            4577,
+            2520,
+            -44.94210181
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              7000,
+              6950,
+              7010,
+              7091
+            ],
+            "candidate": [
+              5678,
+              5638,
+              5999,
+              5688
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -19.78564377,
+            -14.42225392
+          ]
+        }
+      },
+      "errors": []
+    },
+    "owned-vs-borrowed-full_protocol_verify": {
+      "rounds": 4,
+      "processes": 8,
+      "case_groups": 8,
+      "sample_rows": 8000,
+      "retained_observations_per_group": 1000,
+      "warmups_per_group": 100,
+      "numeric_checks_by_metric": {
+        "wall_ns": 32,
+        "thread_cpu_ns": 32,
+        "allocations": 32,
+        "requested_bytes": 32
+      },
+      "numeric_checks": 128,
+      "summary_sha256": "b1f55989c5485c5f573367c002a5bb391ab05f38741e07fe285ae76c8df29863",
+      "runs": [
+        {
+          "round": 1,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "3b59649b442d8f0d3538522115e40fb6fded3ad82a72bc311e92e10db186c517"
+        },
+        {
+          "round": 1,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "ed4d1dce73fa672e0babed57471f4282d9d36d78656a6ce82e83671155de805e"
+        },
+        {
+          "round": 2,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "561423b5aa8c02d845c76888f2ed77edbf0a996f0b76bbf109007246376b6ac4"
+        },
+        {
+          "round": 2,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "018689dd85f901b50490c0813a30ccdd440870d6420685704cdc97a29f46e22e"
+        },
+        {
+          "round": 3,
+          "position": 0,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "9f68a2949560da210b4a496749ecb51a05b3da369ae2fe057ccb31826d5a0b5e"
+        },
+        {
+          "round": 3,
+          "position": 1,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "0cc29837bc431afcd0dd6d909b898f3a2daeb0acb8d167a6ba5f5cffd05f046b"
+        },
+        {
+          "round": 4,
+          "position": 0,
+          "variant": "candidate",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "3780b91557475776c8628cfd87dfebac0c89ce1b1c48f1b649f6bd47c3a9aafe"
+        },
+        {
+          "round": 4,
+          "position": 1,
+          "variant": "baseline",
+          "case_groups": 1,
+          "sample_rows": 1000,
+          "samples_sha256": "c50e6411362516b45258360d4cf0087207bf12f10077831c5d03df46a71a34b3"
+        }
+      ],
+      "comparisons": {
+        "full_protocol_verify": {
+          "baseline_case": "full_protocol_verify",
+          "candidate_case": "full_protocol_verify_borrowed",
+          "cpu_ns": {
+            "p50": [
+              770953.5,
+              767729,
+              -0.41824831
+            ],
+            "p95": [
+              1228816,
+              1126213,
+              -8.34974479
+            ],
+            "p99": [
+              2677009,
+              2315775,
+              -13.49394044
+            ],
+            "mean": [
+              868114.775,
+              836932.885,
+              -3.59190869
+            ]
+          },
+          "wall_ns": {
+            "p50": [
+              769517,
+              766477,
+              -0.395053
+            ],
+            "p95": [
+              1246225.5,
+              1130516.5,
+              -9.28475625
+            ],
+            "p99": [
+              2690270.5,
+              2565897.5,
+              -4.62306671
+            ],
+            "mean": [
+              877899.583,
+              849198.4575,
+              -3.26929481
+            ]
+          },
+          "allocation_calls": [
+            83,
+            51,
+            -38.55421687
+          ],
+          "requested_bytes": [
+            11734,
+            6714,
+            -42.78166013
+          ],
+          "allocation_counts_and_bytes_constant_in_all_samples": true,
+          "cpu_p50_by_round_ns": {
+            "baseline": [
+              771619,
+              770288,
+              862846,
+              732692
+            ],
+            "candidate": [
+              759802,
+              744589,
+              775656,
+              777248
+            ]
+          },
+          "paired_round_cpu_p50_change_percent_range": [
+            -10.10493182,
+            6.08113641
+          ]
+        }
+      },
+      "errors": []
+    }
+  },
+  "unchanged_binary_control_ranges": {
+    "wall_ns": {
+      "p50_all_cases": {
+        "minimum_percent": -11.55057301,
+        "minimum_case": "external_es256_sign_control",
+        "maximum_percent": 3.11371892,
+        "maximum_case": "full_protocol_verify"
+      },
+      "p95_all_cases": {
+        "minimum_percent": -39.27176472,
+        "minimum_case": "external_es256_sign_control",
+        "maximum_percent": 6.15332306,
+        "maximum_case": "full_protocol_verify"
+      },
+      "p99_all_cases": {
+        "minimum_percent": -72.35263272,
+        "minimum_case": "disclosure_verify",
+        "maximum_percent": 16.44174236,
+        "maximum_case": "full_protocol_verify"
+      },
+      "mean_all_cases": {
+        "minimum_percent": -27.49696472,
+        "minimum_case": "canonical_mso_encode",
+        "maximum_percent": 99.72800698,
+        "maximum_case": "issuer_signed_encode"
+      }
+    },
+    "thread_cpu_ns": {
+      "p50_all_cases": {
+        "minimum_percent": -11.74850221,
+        "minimum_case": "external_es256_sign_control",
+        "maximum_percent": 3.21058476,
+        "maximum_case": "full_protocol_verify"
+      },
+      "p95_all_cases": {
+        "minimum_percent": -39.22014054,
+        "minimum_case": "external_es256_sign_control",
+        "maximum_percent": 6.92488263,
+        "maximum_case": "redirect_transcript_validate"
+      },
+      "p99_all_cases": {
+        "minimum_percent": -70.99498081,
+        "minimum_case": "disclosure_verify",
+        "maximum_percent": 29.93562232,
+        "maximum_case": "redirect_transcript_validate"
+      },
+      "mean_all_cases": {
+        "minimum_percent": -27.02826007,
+        "minimum_case": "issuance_prepare",
+        "maximum_percent": 16.33043023,
+        "maximum_case": "redirect_transcript_validate"
+      }
+    }
+  },
+  "report_review": {
+    "path": "docs/borrowed-dependencies-2026-11-18.md",
+    "reviewed_sha256": "287b3ab0b37e501bb35021e8a28b4d6676c3e29021bd2f19e9d45f68986960a7",
+    "table_rows_checked": 21,
+    "numeric_table_values_checked": 147,
+    "rows_by_section": {
+      "owned_vs_borrowed": 3,
+      "previous_main_vs_current": 18
+    },
+    "display_tolerance": "0.0005 microseconds for 3-decimal times; 0.005 percentage points for 2-decimal percentages; allocation calls and bytes exact.",
+    "interpretation": "The report correctly keeps the owned MSO regression, canonical/transcript regressions, response allocation traffic increase and full-issuance regression visible, and avoids treating the small full-verification P50 difference as a speedup. Tail/control values are supplied here for the final report."
+  },
+  "preflights": [
+    {
+      "name": "previous-main",
+      "sample_rows": 18,
+      "returncode": 0,
+      "excluded_from_performance_summary": true
+    },
+    {
+      "name": "current",
+      "sample_rows": 21,
+      "returncode": 0,
+      "excluded_from_performance_summary": true
+    }
+  ],
+  "key_findings": [
+    "All 4,032 summary statistics match raw samples exactly; no recorded observation is missing, duplicated or excluded. All 36 measured processes and 2 preflights returned zero.",
+    "Current borrowed versus owned response parsing: CPU P50 -19.9363%, allocation calls 100 to 41, requested bytes 13,570 to 5,396. MSO parsing: CPU P50 -18.8722%, allocation calls 43 to 16, requested bytes 4,577 to 2,520.",
+    "Current borrowed versus owned full verification: CPU P50 -0.4182%, allocation calls 83 to 51 and requested bytes 11,734 to 6,714. The timing difference does not establish an overall speedup on this shared host.",
+    "Current owned MSO parsing versus previous main regresses CPU P50 by 17.2144% (5,934 to 6,955.5 ns), with paired-round regressions of 15.8526% to 18.6959%; allocation calls still fall 64 to 43. This regression must remain visible.",
+    "Other previous-main comparisons include canonical encoding CPU P50 +7.5806%, transcript validation +4.8662%, owned response allocation traffic +5.1123%, and complete issuance CPU P50 +1.5356%. Lower allocations do not establish lower CPU time.",
+    "Same previous binary control ranges across cases: CPU P50 -11.7485% to +3.2106%; CPU P99 -70.9950% to +29.9356%. Full-verification control P50 +3.2106% and P99 +14.5323%. These are observed variation ranges, not confidence intervals or corrections.",
+    "Current owned versus previous-main full verification CPU P50 -2.0775% but P99 +6.8929%; complete issuance P99 +30.5097%; external signing control P99 +29.7052%; IssuerSigned encoding P99 +32.1202%. All tails remain included; neither speedups nor regressions in noisy tails should be attributed to one code change.",
+    "The five experiments use identical seven-item recorded input fingerprints. Actual binaries, retained response bytes, transcript bytes and Annex source bytes are independently rehashed. Current and old source manifests match their build commits; the old library source/manifest subset matches previous main byte for byte."
+  ],
+  "check_counts": {
+    "experiment_count": 1,
+    "experiment_return_code": 5,
+    "experiment_rounds": 5,
+    "unchanged_control_flag": 5,
+    "process_count": 5,
+    "abba_order": 5,
+    "process_return_code": 36,
+    "output_path": 36,
+    "run_parameters": 36,
+    "metadata_unique_key": 1178,
+    "binary_hash": 38,
+    "binary_length": 38,
+    "binary_path": 38,
+    "build_head": 38,
+    "runtime_checkout": 38,
+    "cpu_affinity": 38,
+    "compiler_version": 38,
+    "build_features": 38,
+    "build_profile": 38,
+    "build_target": 38,
+    "profile_disabled": 38,
+    "clock": 38,
+    "allocation_pass": 38,
+    "destruction_included": 38,
+    "input_unique_name": 266,
+    "input_count": 38,
+    "input_stored_bytes_hash": 76,
+    "manifest_unique_path": 78,
+    "manifest_git_blob_hash": 78,
+    "previous_main_source_equivalence": 28,
+    "previous_main_equivalent_entry_count": 1,
+    "metadata_samples": 36,
+    "unfiltered_cases": 12,
+    "sample_columns": 36,
+    "sample_case_set": 36,
+    "log_unique_case": 252,
+    "execution_log_counts": 36,
+    "observation_sequence": 252,
+    "raw_group_unique": 252,
+    "run_directory_set": 5,
+    "summary_unique_group": 252,
+    "summary_observation_count": 252,
+    "summary_statistic": 4032,
+    "summary_group_set": 5,
+    "selected_case": 24,
+    "preflight_return_code": 2,
+    "preflight_check_mode": 2,
+    "preflight_case_samples": 2,
+    "input_fingerprints_equal_across_all_runs": 1
+  },
+  "errors": []
+}

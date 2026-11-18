@@ -1,0 +1,39 @@
+{
+  "commit": "27c68b248260c7c0c0c4268b1cf9f44413241eb0",
+  "run_id": 44250617528,
+  "url": "https://github.com/nazozero/nazo-mdoc/actions/runs/44250617528",
+  "jobs": [
+    {
+      "id": 134620104046,
+      "name": "advisories",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 134620104315,
+      "name": "fuzz",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 134620104404,
+      "name": "targets",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 134620104412,
+      "name": "rust",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "fuzz": {
+    "executions": 394639,
+    "seconds": 121
+  },
+  "audit": {
+    "advisories": 1527,
+    "lockfile_packages_including_root": 99
+  }
+}
