@@ -1,0 +1,77 @@
+{
+  "unchanged_control": true,
+  "runs": [
+    {
+      "round": 1,
+      "position": 0,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/control/round-01/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    },
+    {
+      "round": 1,
+      "position": 1,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/control/round-01/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    },
+    {
+      "round": 2,
+      "position": 0,
+      "variant": "candidate",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/control/round-02/candidate",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    },
+    {
+      "round": 2,
+      "position": 1,
+      "variant": "baseline",
+      "command": [
+        "/workspace/scratch/5e92231441b9/target-core-baseline/release/mdoc-core-benchmark",
+        "--fixture",
+        "/workspace/scratch/5e92231441b9/core-fixture",
+        "--out",
+        "/workspace/scratch/161c349d4a9e/final-review/control/round-02/baseline",
+        "--samples",
+        "1000",
+        "--warmup",
+        "100"
+      ],
+      "returncode": 0,
+      "sha256": "b69ec61cb1f1c02a7c89d30c2d8e5bd1591addbd44fdc20a8c4cb222cd5fa218"
+    }
+  ]
+}

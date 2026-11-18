@@ -1,0 +1,91 @@
+{
+  "candidate_source": "bd18332dc2735c7a0784118fae91a8d5f414dc0d",
+  "baseline_source": "070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc",
+  "features": "no-default-features; verification consumer; issue disabled",
+  "release": "opt-level=3;lto=thin;codegen-units=1;debug=0;panic=unwind",
+  "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)\nbinary: rustc\ncommit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a\ncommit-date: 2026-11-09\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0\nLLVM version: 23.1.5\n",
+  "native_executed": true,
+  "wasm_executed": false,
+  "artifacts": [
+    {
+      "variant": "baseline",
+      "artifact": "native",
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "/workspace/scratch/5e92231441b9/target-size-baseline/release/mdoc-core-consumer",
+      "bytes": 1270808,
+      "sha256": "bf44ab6b327c5f286461c1c4b90f37bdaccff7f66f4017334f85d166934ffb4d"
+    },
+    {
+      "variant": "baseline",
+      "artifact": "native_stripped",
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "/workspace/scratch/5e92231441b9/consumer-baseline-stripped",
+      "bytes": 1065784,
+      "sha256": "cab3ca4e0af26605d65ee9eec0df0205ce980bfc8df1e6f7bb0179f5f662ab2f"
+    },
+    {
+      "variant": "baseline",
+      "artifact": "rlib",
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "/workspace/scratch/5e92231441b9/target-size-baseline/release/build/nazo-mdoc/52ed91c02b2a109b/out/libnazo_mdoc-52ed91c02b2a109b.rlib",
+      "bytes": 2323872,
+      "sha256": "d571fc6f2b05d0f672e13ba212073c8ac1ba0bdba772b2dab3136dac77b3ec63"
+    },
+    {
+      "variant": "baseline",
+      "artifact": "wasm_component",
+      "target": "wasm32-wasip2",
+      "path": "/workspace/scratch/5e92231441b9/target-size-wasm-baseline/wasm32-wasip2/release/mdoc-core-consumer.wasm",
+      "bytes": 853631,
+      "sha256": "7e3143fd3ff344b1e716321411e88553e1dcd604682efd44581e0e60b6022c92"
+    },
+    {
+      "variant": "baseline",
+      "artifact": "rlib",
+      "target": "wasm32-wasip2",
+      "path": "/workspace/scratch/5e92231441b9/target-size-wasm-baseline/wasm32-wasip2/release/build/nazo-mdoc/691870a5dcc28898/out/libnazo_mdoc-691870a5dcc28898.rlib",
+      "bytes": 2252832,
+      "sha256": "c438f68d2bbd58d6826e4d14885aa2b7c86dbee3cc940931c4508d6cb4754ee5"
+    },
+    {
+      "variant": "candidate",
+      "artifact": "native",
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "/workspace/scratch/5e92231441b9/target-size-candidate/release/mdoc-core-consumer",
+      "bytes": 1189272,
+      "sha256": "cddb96a232d928d9bb3b7054a23e12ff166afbae8dfb3e55c7fa75d1ecd2c2e7"
+    },
+    {
+      "variant": "candidate",
+      "artifact": "native_stripped",
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "/workspace/scratch/161c349d4a9e/final-review/consumer-candidate-stripped",
+      "bytes": 990952,
+      "sha256": "a0474e3b45b5b6711aee2927e23be106ee3a33f1ab4afcae513f7a346a9901d3"
+    },
+    {
+      "variant": "candidate",
+      "artifact": "rlib",
+      "target": "x86_64-unknown-linux-gnu",
+      "path": "/workspace/scratch/5e92231441b9/target-size-candidate/release/build/nazo-mdoc/5cc41b6d2734aa04/out/libnazo_mdoc-5cc41b6d2734aa04.rlib",
+      "bytes": 2274784,
+      "sha256": "fee592d703829c83fbfc37dc2a208df91e8d637575ee38545f99178ee0e107b4"
+    },
+    {
+      "variant": "candidate",
+      "artifact": "wasm_component",
+      "target": "wasm32-wasip2",
+      "path": "/workspace/scratch/5e92231441b9/target-size-wasm-candidate/wasm32-wasip2/release/mdoc-core-consumer.wasm",
+      "bytes": 774043,
+      "sha256": "00a9b2a129806aef4e397be82732372edd30f85a2ca6d3625e0cb2769b8f9d57"
+    },
+    {
+      "variant": "candidate",
+      "artifact": "rlib",
+      "target": "wasm32-wasip2",
+      "path": "/workspace/scratch/5e92231441b9/target-size-wasm-candidate/wasm32-wasip2/release/build/nazo-mdoc/c2a4dfcf095230da/out/libnazo_mdoc-c2a4dfcf095230da.rlib",
+      "bytes": 2212242,
+      "sha256": "e27b302ee074cf643049f54d71c61d505b3b1300c9daa746eb841c9584b5c974"
+    }
+  ]
+}

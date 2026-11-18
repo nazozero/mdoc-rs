@@ -1,5 +1,7 @@
 # Core performance — 2026-11-18
 
+The [final review and measurements](performance-2026-11-18-final.md) cover the later implementation.
+
 [Issue #4](https://github.com/nazozero/nazo-mdoc/issues/4) covers parsing, issuance
 and verification costs. This change shortens CBOR processing and removes
 temporary allocations while retaining the public API and authentication checks.

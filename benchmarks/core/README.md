@@ -90,7 +90,7 @@ capacity of each reallocation. They describe allocator traffic. Executable
 sizes include fixtures, instrumentation, and all benchmark cases; measure a
 separate minimal consumer when reporting library size.
 
-The [2026-11-18 report](../../docs/performance-2026-11-18.md) links the measured
+The [final 2026-11-18 report](../../docs/performance-2026-11-18-final.md) links the measured
 revisions, per-round quantiles and archived raw evidence.
 
 ## Cases
