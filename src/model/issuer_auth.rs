@@ -158,7 +158,7 @@ fn required<T>(value: Option<T>, field: &str) -> Result<T, MdocError> {
 
 /// Project an MSO whose complete encoding has passed raw CBOR validation,
 /// establishing unique map keys including extension values.
-pub(crate) fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
+fn parse_mso_value(value: Value) -> Result<Mso, MdocError> {
     let mut version = None;
     let mut digest_algorithm = None;
     let mut doc_type = None;
