@@ -95,7 +95,7 @@ authenticated `status` value is retained for application policy.
 The [protocol matrix](docs/protocol-matrix.md) maps requirements to code and
 tests. Full ISO reader support, including Brainpool/Ed448, proximity engagement,
 reader authentication and complete MAC session setup, is tracked in
-[issue #3](https://github.com/nazozero/mdoc-rs/issues/3).
+[issue #3](https://github.com/nazozero/nazo-mdoc/issues/3).
 
 ## Features
 

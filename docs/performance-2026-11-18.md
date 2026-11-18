@@ -1,6 +1,6 @@
 # Core performance — 2026-11-18
 
-[Issue #4](https://github.com/nazozero/mdoc-rs/issues/4) covers parsing, issuance
+[Issue #4](https://github.com/nazozero/nazo-mdoc/issues/4) covers parsing, issuance
 and verification costs. This change shortens CBOR processing and removes
 temporary allocations while retaining the public API and authentication checks.
 
@@ -148,7 +148,7 @@ built and measured. Exact hashes, features and flags are in
 
 ## Validation
 
-The [source CI run](https://github.com/nazozero/mdoc-rs/actions/runs/44224722403)
+The [source CI run](https://github.com/nazozero/nazo-mdoc/actions/runs/44224722403)
 passed Rust, target, advisory and fuzz jobs. Local tests passed with no default
 features (146), `issue` (204) and all features (209), together with formatting,
 Clippy, documentation, three WASM configurations and `cargo audit --deny warnings`.

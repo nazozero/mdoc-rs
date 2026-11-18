@@ -12,12 +12,12 @@ issue #4. The [protocol matrix](protocol-matrix.md) describes the covered API.
 | Candidate runtime | `d2f653d262da4c783ca6c430ef1f056f40baa25f`, `nazo-mdoc 0.3.0` |
 | Candidate tree | `e04bdf111f1a849ed11082548207cb63987eb25d` |
 | CI merge commit | `051adc3f791a1e063511231be0a116267f7d2b3e`, with the same tree |
-| Review | [PR #2](https://github.com/nazozero/mdoc-rs/pull/2) |
+| Review | [PR #2](https://github.com/nazozero/nazo-mdoc/pull/2) |
 | Toolchain | Rust 1.100.0, `0ef1bc386059596dada8fb65b50425aab2ea637a`, LLVM 23.1.5 |
 
 ## Executed core gates
 
-The [runtime CI run](https://github.com/nazozero/mdoc-rs/actions/runs/44124404106)
+The [runtime CI run](https://github.com/nazozero/nazo-mdoc/actions/runs/44124404106)
 passed all four jobs: Rust, targets, fuzz and advisories.
 
 - Formatting, minimum/issue checks, all-target Clippy and rustdoc passed with
@@ -116,7 +116,7 @@ zero allocations in each sample.
 Issuance increased median CPU cost by **5.09×**. Added work includes schema,
 key/certificate validation and signature confirmation against the certificate
 key. MSO parsing and inner CBOR decoding also increased CPU time. These costs
-are the starting point for [issue #4](https://github.com/nazozero/mdoc-rs/issues/4).
+are the starting point for [issue #4](https://github.com/nazozero/nazo-mdoc/issues/4).
 
 Two legacy operations have different contracts: the old DeviceAuthentication
 constructor omits outer Tag 24, and the old full verifier rejects the valid
@@ -167,4 +167,4 @@ preservation, and `run-03` used `2492f361` before the version, RFU, namespace an
 ownership corrections.
 
 The original record is preserved in
-[Git history](https://github.com/nazozero/mdoc-rs/blob/209093017917eb389b37b1e54a542b201c1c5467/docs/validation-2026-11-17.md).
+[Git history](https://github.com/nazozero/nazo-mdoc/blob/209093017917eb389b37b1e54a542b201c1c5467/docs/validation-2026-11-17.md).

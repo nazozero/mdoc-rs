@@ -28,7 +28,7 @@ are separate primitives for applications that establish the session key.
 A complete ISO reader also requires the Brainpool/Ed448 combinations in
 §9.1.2.4 and both MAC and signature authentication in §9.1.3.4. These capabilities,
 reader authentication and proximity engagement are tracked in
-[issue #3](https://github.com/nazozero/mdoc-rs/issues/3).
+[issue #3](https://github.com/nazozero/nazo-mdoc/issues/3).
 
 [ISO/IEC TS 18013-7:2025](https://www.iso.org/standard/91154.html) and the
 ISO/IEC 23220 series require further full-text review. The reviewed

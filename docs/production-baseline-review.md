@@ -38,4 +38,4 @@ Existing credentials with out-of-range digest IDs require reissuance; see
 contracts are identified in the [comparison method](../benchmarks/compare/README.md).
 The [validation record](validation-2026-11-17.md) retains the measured baseline
 and 0.3 results. The original review remains in
-[Git history](https://github.com/nazozero/mdoc-rs/blob/209093017917eb389b37b1e54a542b201c1c5467/docs/production-baseline-review.md).
+[Git history](https://github.com/nazozero/nazo-mdoc/blob/209093017917eb389b37b1e54a542b201c1c5467/docs/production-baseline-review.md).
