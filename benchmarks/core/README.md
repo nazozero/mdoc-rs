@@ -38,8 +38,10 @@ python3 benchmarks/core/symbolize.py /tmp/mdoc-profile-baseline
 The allocation profiler records one successful operation per case. It stores
 stacks in a fixed array and disables allocation counting during unwinding. The
 output includes raw ELF offsets, complete symbolized stacks, and call-site
-summaries. `addr2line` resolves the release binary's debug information. Retain
-that executable until symbolization finishes. Tracing has no timing claims.
+summaries. `addr2line` expands inlined frames from the release binary's debug
+information. Retain that executable until symbolization finishes. A relocated
+copy can be passed with `symbolize.py DIRECTORY --executable PATH`; its hash must
+match the recorded binary. Tracing records allocations separately from timing.
 
 `--case NAME` selects an operation. `--iterations N` repeats it under an external
 CPU profiler; the first operation also records allocation stacks. Preparation
@@ -77,6 +79,7 @@ The outputs are:
 - `round-NN/VARIANT/samples.csv`: every observation in its original order.
 - `summary.csv`: each run's nearest-rank P50/P95/P99 and means; rounds stay separate.
 - `inputs.txt`: exact input and deterministic-output hashes.
+- `transcript.cbor`: the public transcript used by the verification consumer.
 - `metadata.txt` and `build-source-manifest.txt`: toolchain, revision, build-time
   source hashes, flags, binary identity, affinity, and measurement definitions.
 - `execution.log`: successful and failed process output. A failed run is retained
@@ -86,6 +89,9 @@ Requested bytes count successful allocation requests, including the full new
 capacity of each reallocation. They describe allocator traffic. Executable
 sizes include fixtures, instrumentation, and all benchmark cases; measure a
 separate minimal consumer when reporting library size.
+
+The [2026-11-18 report](../../docs/performance-2026-11-18.md) links the measured
+revisions, per-round quantiles and archived raw evidence.
 
 ## Cases
 

@@ -1,0 +1,34 @@
+{
+  "source": "a283838001cdee39f3608b935e88373190c5e3d9",
+  "run_url": "https://github.com/nazozero/mdoc-rs/actions/runs/44224722403",
+  "jobs": [
+    {
+      "name": "rust",
+      "conclusion": "success",
+      "html_url": "https://github.com/nazozero/mdoc-rs/actions/runs/44224722403/job/134534973511",
+      "started_at": "2026-11-18T02:38:19Z",
+      "completed_at": "2026-11-18T02:39:14Z"
+    },
+    {
+      "name": "advisories",
+      "conclusion": "success",
+      "html_url": "https://github.com/nazozero/mdoc-rs/actions/runs/44224722403/job/134534973975",
+      "started_at": "2026-11-18T02:38:19Z",
+      "completed_at": "2026-11-18T02:41:26Z"
+    },
+    {
+      "name": "fuzz",
+      "conclusion": "success",
+      "html_url": "https://github.com/nazozero/mdoc-rs/actions/runs/44224722403/job/134534973988",
+      "started_at": "2026-11-18T02:38:19Z",
+      "completed_at": "2026-11-18T02:41:53Z"
+    },
+    {
+      "name": "targets",
+      "conclusion": "success",
+      "html_url": "https://github.com/nazozero/mdoc-rs/actions/runs/44224722403/job/134534974048",
+      "started_at": "2026-11-18T02:38:19Z",
+      "completed_at": "2026-11-18T02:39:06Z"
+    }
+  ]
+}

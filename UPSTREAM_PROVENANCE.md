@@ -11,12 +11,5 @@ licensed under BSD-2-Clause.
 | Imported file hashes | [UPSTREAM_FILES.sha256](UPSTREAM_FILES.sha256) |
 | Baseline tag | `upstream-crates-io-v0.2.0` |
 
-The upstream repository was unavailable at import. The baseline was reconstructed
-from the published archive, excluding Cargo's `.cargo-ok` extraction marker and
-`.cargo_vcs_info.json`; the latter's revision is recorded above. The archive
-declared BSD-2-Clause without a standalone license file. [LICENSE](LICENSE)
-contains that license and the original author attribution.
-
-Version 0.3 continues from `9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc`.
-Earlier maintenance records remain in Git history; API changes are described in
-[migration](docs/migration.md).
+The import excludes Cargo's `.cargo-ok` and `.cargo_vcs_info.json` packaging
+metadata. [LICENSE](LICENSE) retains the upstream license and author attribution.
