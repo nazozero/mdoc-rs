@@ -279,6 +279,8 @@ pub fn build_device_authentication_bytes(
 ///
 /// `device_name_spaces_bytes` is a complete Tag 24 envelope containing
 /// `DeviceNameSpaces`. Its encoding is checked and retained exactly.
+/// `DeviceNameSpaces` may be empty; every present namespace must contain at
+/// least one item, and namespace names and element identifiers must be nonempty.
 pub fn build_device_authentication(
     transcript: &SessionTranscript<'_>,
     doc_type: &str,
