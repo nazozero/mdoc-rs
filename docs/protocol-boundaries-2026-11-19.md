@@ -51,6 +51,10 @@ construction, not credential or certificate signatures.
   authenticated MSO authorizes that namespace. Both holder preparation and
   verification enforce this rule while allowing separately authorized domestic
   and future fields.
+- RFC 3339 §5.6 permits lowercase `t`/`z`. MSO and mDL time parsing accepts
+  either case while preserving signed bytes; formatting emits uppercase.
+  Re-signed MSO and mDL regressions cover all case combinations. Fractional
+  seconds and numeric UTC offsets remain forbidden by the ISO wire profile.
 
 `tests/vectors/certificates/generate.py` deterministically generates 58 public
 test certificates with Python `cryptography`. Rust verifies every ECDSA
@@ -93,9 +97,9 @@ Rust 1.100.0 on Linux, two build jobs per Cargo process:
 
 | Gate | Result |
 | --- | --- |
-| `cargo test --no-default-features` | 159 passed |
-| `cargo test --no-default-features --features issue` | 243 passed |
-| `cargo test --all-features` | 256 passed |
+| `cargo test --locked --no-default-features` | 161 passed |
+| `cargo test --locked --no-default-features --features issue` | 248 passed |
+| `cargo test --locked --all-features` | 261 passed |
 | `cargo clippy --all-features --all-targets -- -D warnings` | Passed |
 | `cargo fmt --all --check`; rustdoc with `-D warnings` | Passed |
 | `wasm32-unknown-unknown`, no default features | Built |

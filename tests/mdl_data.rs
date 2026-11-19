@@ -162,6 +162,19 @@ fn mdl_data_types_are_authoritative_for_issuance_and_signed_verification() {
 }
 
 #[test]
+fn mdl_timestamps_accept_rfc3339_letter_case() {
+    for (separator, utc) in [("T", "Z"), ("t", "Z"), ("T", "z"), ("t", "z")] {
+        let text = format!("2026-11-17{separator}12:00:00{utc}");
+        for name in ["issue_date", "expiry_date", "portrait_capture_date"] {
+            let value = tagged(0, &text);
+            let encoded = signed_mdl(name, value.clone());
+            let _ = nazo_mdoc::verify_issued_borrowed(&encoded, DOC_TYPE, now()).unwrap();
+            prepare(DOC_TYPE, name, value).unwrap();
+        }
+    }
+}
+
+#[test]
 #[cfg(feature = "certificate-profile")]
 fn authenticated_country_and_jurisdiction_are_checked_before_pending_trust() {
     for (name, value) in [("issuing_country", "US"), ("issuing_jurisdiction", "US-CA")] {

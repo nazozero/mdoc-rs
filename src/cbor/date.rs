@@ -64,8 +64,9 @@ impl FullDate {
 
 /// Validate ISO/IEC 18013-5:2021 §7.2.1 date strings without allocating.
 /// Tag 1004 is a full-date; Tag 0 uses whole UTC seconds, including a
-/// representable RFC 3339 leap second. The caller chooses the permitted tag
-/// for the specific field; other tags are rejected.
+/// representable RFC 3339 leap second and case-insensitive `T`/`Z` letters.
+/// The caller chooses the permitted tag for the specific field; other tags
+/// are rejected.
 pub fn validate_date_tag(tag: u64, text: &str) -> Result<(), MdocError> {
     match tag {
         TAG_FULL_DATE => FullDateRef::new(text).map(|_| ()),
@@ -104,7 +105,7 @@ pub(crate) fn parse_full_date(date: &str) -> Result<::time::Date, MdocError> {
 }
 
 pub(crate) fn parse_tdate(text: &str) -> Result<crate::Timestamp, MdocError> {
-    if text.len() != 20 || text.as_bytes().get(10) != Some(&b'T') || !text.ends_with('Z') {
+    if text.len() != 20 || !matches!(text.as_bytes().last(), Some(b'Z' | b'z')) {
         return Err(MdocError::Cbor(
             "ISO date requires whole UTC seconds".into(),
         ));
@@ -115,6 +116,33 @@ pub(crate) fn parse_tdate(text: &str) -> Result<crate::Timestamp, MdocError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tdate_accepts_rfc3339_letter_case_and_retains_iso_time_restrictions() {
+        for text in [
+            "2026-11-17T12:00:00Z",
+            "2026-11-17t12:00:00Z",
+            "2026-11-17T12:00:00z",
+            "2026-11-17t12:00:00z",
+        ] {
+            validate_date_tag(0, text).unwrap();
+            assert_eq!(
+                parse_tdate(text).unwrap().format_rfc3339().unwrap(),
+                "2026-11-17T12:00:00Z"
+            );
+        }
+        for text in [
+            "2026-11-17T12:00:00.0Z",
+            "2026-11-17t12:00:00.0z",
+            "2026-11-17T12:00:00+00:00",
+            "2026-11-17t12:00:00-00:00",
+            "2026-11-17 12:00:00Z",
+            "2026-11-17X12:00:00Z",
+            "2026-11-17T12:00:00",
+        ] {
+            assert!(validate_date_tag(0, text).is_err(), "accepted {text}");
+        }
+    }
 
     #[test]
     fn full_date_round_trip() {

@@ -129,12 +129,13 @@ application.
 
 MSO dates use Tag 0 and UTC whole seconds. Builders check ordering before and
 after truncating subsecond input. The parser rejects epoch tags, fractional MSO
-seconds and non-`Z` offsets.
+seconds and numeric UTC offsets. MSO and mDL timestamps accept `T`/`t` and `Z`/`z`
+as required by RFC 3339 §5.6; authenticated input bytes are preserved.
 
 `Timestamp::parse_rfc3339` preserves whole leap seconds, and `format_rfc3339`
-renders UTC. `unix_seconds` and `unix_nanos` return `None` for leap seconds.
-Consumers using another time type must handle that case explicitly;
-`truncate_to_second` retains the leap-second marker.
+renders UTC with uppercase `T`/`Z`. `unix_seconds` and `unix_nanos` return `None`
+for leap seconds. Consumers using another time type must handle that case
+explicitly; `truncate_to_second` retains the leap-second marker.
 
 ## Existing credentials
 

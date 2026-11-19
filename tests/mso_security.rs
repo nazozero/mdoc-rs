@@ -526,10 +526,9 @@ fn timestamp_tag_and_iso_utc_whole_second_profile_are_required() {
             tdate("2026-01-01T00:00:00+00:00"),
             tdate("2026-01-01T00:00:00-01:00"),
             tdate("2026-01-01T00:00:00"),
-            tdate("2026-01-01T00:00:00z"),
+            tdate("2026-01-01 00:00:00Z"),
             tdate("2026-01-01X00:00:00Z"),
             tdate("2026-01-01\x0000:00:00Z"),
-            tdate("2026-01-01t00:00:00Z"),
             tdate("2026-02-30T00:00:00Z"),
         ] {
             let mut value = valid_mso();

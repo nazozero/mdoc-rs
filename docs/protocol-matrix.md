@@ -71,7 +71,7 @@ tests below are relative to this repository.
 | MSO-03 | ISO §§9.1.2.4–9.1.2.5; required; the upper bound is in §9.1.2.4 prose, printed p. 51, in addition to CDDL `uint` | Digest name/length and `0 <= digestID < 2^31` checked together, including undisclosed MSO entries. Historical unrestricted-u32 issuer output can be rejected; see the migration inventory/reissuance requirement. | `parse_value_digests`; `src/builder.rs` | `digest_algorithms_and_output_lengths_are_bound`; `digest_identifiers_and_namespace_shapes_are_strict`; `digest_id_range_boundary_is_enforced`; `random_digest_ids_are_unique_and_31_bit` |
 | MSO-04 | ISO §9.1.2.4; required | Tag 0, UTC `Z`, whole seconds; `signed <= validFrom < validUntil`. | `parse_datetime`; `ValidityInfo::validate` | `timestamp_tag_and_iso_utc_whole_second_profile_are_required`; `validity_order_and_required_members_are_enforced` |
 | TIME-01 | RFC 3339 §§5.6–5.7; required precision boundary | A whole second labelled `60` remains distinct: ordinary `59.999999999 < 60 < next second`. Unix conversion returns `None` for leap seconds. No self-written calendar or timezone rules. | `src/time.rs::Timestamp`; `src/verifier.rs` | Unit `leap_second_has_exact_order_beyond_the_last_ordinary_nanosecond`; `utc_normalization_retains_leap_seconds_and_ordinary_fractional_precision`; `iso_boundaries::whole_leap_second_is_not_truncated_to_the_certificate_last_regular_second` |
-| TIME-02 | Selected API/encoding profile; required | Require uppercase `T`; MSO requires exactly 20-byte UTC `Z` form. General issuance input has at most nine fractional digits; longer input rejects before any interval comparison. Fractional leap seconds reject. | `src/time.rs`; MSO parser; builder | Unit `calendar_and_unsupported_leap_inputs_fail_closed`; `roundtrip_test::normalization_cannot_hide_reversed_order_or_create_an_empty_interval`; `subsecond_clock_input_is_normalized_only_after_order_validation` |
+| TIME-02 | ISO §§7.2.1/9.1.2.4; RFC 3339 §5.6; API precision bound | Accept `T`/`t` and `Z`/`z`; MSO and mDL tdate require exactly 20-byte UTC whole seconds. Formatting emits uppercase. General issuance input has at most nine fractional digits; longer input rejects before any interval comparison. Fractional leap seconds reject. | `src/time.rs`; `cbor::date`; MSO parser; builder | Unit `rfc3339_letters_are_case_insensitive_and_format_as_uppercase`; `iso_boundaries::authenticated_mso_timestamps_accept_rfc3339_letter_case`; `authenticated_mso_timestamps_still_require_whole_seconds_and_utc_designator`; `mdl_data::mdl_timestamps_accept_rfc3339_letter_case`; `roundtrip_test::normalization_cannot_hide_reversed_order_or_create_an_empty_interval` |
 | TIME-03 | Range/conversion integrity; required | Four-digit UTC years, exact ordinary nanoseconds, checked offset conversion and consistent equality/order/hash. No silent projection of leap seconds into POSIX time. | `src/time.rs` | Unit `unix_conversion_preserves_negative_and_subsecond_instants`; `utc_offsets_preserve_identity_and_four_digit_year_bounds_are_checked` |
 | MSO-05 | ISO §9.1.2.4; required when present | Nonempty, typed, disjoint KeyAuthorizations; no filtering malformed items. | `parse_key_authorizations` | `key_authorizations_preserve_both_disjoint_forms`; `malformed_or_overlapping_key_authorizations_are_rejected_without_filtering` |
 | MSO-06 | ISO §§8.1, 9.1.2.4 and selected extension policy | Preserve MSO/DeviceKeyInfo extensions and integer keyInfo. Positive RFU keyInfo labels are ignored for admission without discarding their values; an empty keyInfo map is permitted. Proprietary negative or undesignated zero labels and unknown security extensions require profile support. | `src/model/types.rs`; MSO parser; `src/verifier.rs` | `device_key_is_required_and_information_extensions_are_preserved`; `iso_boundaries::authenticated_rfu_key_information_is_preserved_without_extra_authority`; `unknown_authenticated_device_key_information_requires_explicit_profile_support`; `verifier_test::unauthenticated_future_mso_extension_is_not_silently_dropped` (the test re-signs the modified MSO); `validity_order_and_required_members_are_enforced`; `malformed_or_overlapping_key_authorizations_are_rejected_without_filtering` |
@@ -138,11 +138,14 @@ MSO validity requires Tag 0 with a 20-byte UTC whole-second timestamp and
 and signed-time containment within the leaf certificate validity interval.
 Application path validation uses the current verification time.
 
-`Timestamp` delegates calendar and RFC 3339 parsing to `time`. It requires
-uppercase `T`, permits at most nine ordinary fractional digits and retains whole
-leap seconds distinctly. Fractional leap seconds are rejected. Comparison orders
+`Timestamp` delegates calendar and RFC 3339 parsing to `time`. It accepts
+case-insensitive `T`/`Z` letters under [RFC 3339 §5.6](https://www.rfc-editor.org/rfc/rfc3339.html#section-5.6),
+permits at most nine ordinary fractional digits and retains whole leap seconds
+distinctly. Fractional leap seconds are rejected. Comparison orders
 `59.999999999 < 60 < next second`; Unix conversion returns `None` for `60`.
-Formatting preserves the leap label. Signed MSO bytes remain unchanged.
+Formatting emits uppercase `T`/`Z` and preserves the leap label. Signed MSO bytes
+remain unchanged. ISO's whole-second and UTC-designator restrictions apply equally
+to uppercase and lowercase input.
 
 [CGPM Resolution 5 (2026)](https://www.bipm.org/en/cgpm-2026/resolution-5)
 sets continuous UTC from 20 May 2027. Historical

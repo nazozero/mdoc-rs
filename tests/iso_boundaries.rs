@@ -100,6 +100,65 @@ fn expect_validity_rejection(document: &IssuerSignedDocument, at: Timestamp, rea
 }
 
 #[test]
+fn authenticated_mso_timestamps_accept_rfc3339_letter_case() {
+    let mut dates = validity();
+    dates.expected_update = Some(offset_seconds(now(), 24 * 60 * 60));
+    for (separator, utc) in [("T", "Z"), ("t", "Z"), ("T", "z"), ("t", "z")] {
+        let mut document = issue(builder().validity(dates.clone()));
+        authenticate_mso(&mut document, |mso| {
+            for (_, value) in field_mut(mso, "validityInfo").as_map_mut().unwrap() {
+                let Value::Tag(0, inner) = value else {
+                    panic!("fixture timestamps have Tag 0");
+                };
+                **inner = inner
+                    .as_text()
+                    .unwrap()
+                    .replace('T', separator)
+                    .replace('Z', utc)
+                    .into();
+            }
+        });
+        let encoded = document.to_issuer_signed_cbor().unwrap();
+        let pending = verify_issued(&encoded, DOC_TYPE, now()).unwrap();
+        let parsed = &pending.mso().validity_info;
+        assert_eq!(parsed.signed, dates.signed);
+        assert_eq!(parsed.valid_from, dates.valid_from);
+        assert_eq!(parsed.valid_until, dates.valid_until);
+        assert_eq!(parsed.expected_update, dates.expected_update);
+        assert_eq!(
+            pending
+                .document()
+                .issuer_signed
+                .issuer_auth
+                .cose_sign1
+                .payload,
+            document.issuer_signed.issuer_auth.cose_sign1.payload,
+            "parsing must preserve the original signed payload"
+        );
+    }
+}
+
+#[test]
+fn authenticated_mso_timestamps_still_require_whole_seconds_and_utc_designator() {
+    for text in [
+        "2026-11-17T12:00:00.0Z",
+        "2026-11-17t12:00:00.0z",
+        "2026-11-17T12:00:00+00:00",
+        "2026-11-17t12:00:00-00:00",
+    ] {
+        let mut document = issue(builder());
+        authenticate_mso(&mut document, |mso| {
+            *field_mut(field_mut(mso, "validityInfo"), "signed") =
+                Value::Tag(0, Box::new(text.into()));
+        });
+        assert!(
+            verify_issued(&document.to_issuer_signed_cbor().unwrap(), DOC_TYPE, now()).is_err(),
+            "accepted {text}"
+        );
+    }
+}
+
+#[test]
 fn authenticated_mso_signed_time_is_contained_by_inclusive_leaf_certificate_bounds() {
     let leaf = x509_cert::Certificate::from_der(&hex::decode(GENUINE_CERT_HEX).unwrap()).unwrap();
     let convert = |value: x509_cert::time::Time| {
