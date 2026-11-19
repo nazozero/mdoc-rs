@@ -5,6 +5,8 @@ use crate::model::{CoseHeaderRef, CoseLabelRef};
 use coset::{RegisteredLabelWithPrivate, iana};
 
 pub mod key;
+#[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+pub(crate) mod openssl_backend;
 mod structure;
 mod verify;
 

@@ -117,11 +117,19 @@ pub fn verify_presentation_borrowed<'a>(
 ) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
     #[cfg(feature = "certificate-profile")]
     {
-        verify_presentation_borrowed_inner(encoded, transcript, options, None)
+        verify_presentation_borrowed_inner::<false>(
+            encoded,
+            transcript,
+            options,
+            None,
+            |_, _, _| unreachable!("signature-only policy"),
+        )
     }
     #[cfg(not(feature = "certificate-profile"))]
     {
-        verify_presentation_borrowed_inner(encoded, transcript, options)
+        verify_presentation_borrowed_inner::<false>(encoded, transcript, options, |_, _, _| {
+            unreachable!("signature-only policy")
+        })
     }
 }
 
@@ -135,22 +143,86 @@ pub fn verify_presentation_borrowed_with_signer<'a>(
     options: &VerificationOptions,
     signer: Option<&crate::certificate::PreparedDocumentSigner>,
 ) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
-    verify_presentation_borrowed_inner(encoded, transcript, options, signer)
+    verify_presentation_borrowed_inner::<false>(encoded, transcript, options, signer, |_, _, _| {
+        unreachable!("signature-only policy")
+    })
 }
 
-fn verify_presentation_borrowed_inner<'a>(
+#[cfg(feature = "reader-session")]
+pub(crate) fn verify_presentation_borrowed_in_session<
+    'a,
+    K: crate::session::reader::ReaderKeyAgreement,
+>(
+    response: DeviceResponseRef<'a>,
+    transcript: &SessionTranscript<'_>,
+    options: &VerificationOptions,
+    reader_key: &mut K,
+    reader_curve: i64,
+    salt: &[u8; 32],
+    #[cfg(feature = "certificate-profile")] signer: Option<
+        &crate::certificate::PreparedDocumentSigner,
+    >,
+) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
+    verify_parsed_presentation::<true>(
+        response,
+        transcript,
+        options,
+        #[cfg(feature = "certificate-profile")]
+        signer,
+        |device_key, mac, payload| {
+            crate::session::reader::verify_device_mac(
+                reader_key,
+                reader_curve,
+                device_key,
+                mac,
+                salt,
+                payload,
+            )
+        },
+    )
+}
+
+fn verify_presentation_borrowed_inner<'a, const ALLOW_MAC: bool>(
     encoded: &'a [u8],
     transcript: &SessionTranscript<'_>,
     options: &VerificationOptions,
     #[cfg(feature = "certificate-profile")] signer: Option<
         &crate::certificate::PreparedDocumentSigner,
     >,
+    verify_mac: impl FnMut(
+        &CoseKeyRef<'_>,
+        &CoseMac0Ref<'_>,
+        &crate::session::DeviceAuthentication<'_>,
+    ) -> Result<(), MdocError>,
 ) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
     let response = crate::parser::parse_borrowed_with_limits(
         encoded,
         Limits::default(),
         options.max_documents,
     )?;
+    verify_parsed_presentation::<ALLOW_MAC>(
+        response,
+        transcript,
+        options,
+        #[cfg(feature = "certificate-profile")]
+        signer,
+        verify_mac,
+    )
+}
+
+fn verify_parsed_presentation<'a, const ALLOW_MAC: bool>(
+    response: DeviceResponseRef<'a>,
+    transcript: &SessionTranscript<'_>,
+    options: &VerificationOptions,
+    #[cfg(feature = "certificate-profile")] signer: Option<
+        &crate::certificate::PreparedDocumentSigner,
+    >,
+    mut verify_mac: impl FnMut(
+        &CoseKeyRef<'_>,
+        &CoseMac0Ref<'_>,
+        &crate::session::DeviceAuthentication<'_>,
+    ) -> Result<(), MdocError>,
+) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
     if !supports_version(response.version) || response.status != DeviceResponseStatus::Ok {
         return Err(MdocError::Parse(
             "unsupported version or non-success DeviceResponse status".into(),
@@ -162,11 +234,11 @@ fn verify_presentation_borrowed_inner<'a>(
             .device_signed
             .as_ref()
             .ok_or_else(|| MdocError::DeviceAuth("missing holder authentication".into()))?;
-        let DeviceAuthRef::Signature(signature) = &device.device_auth else {
+        if !ALLOW_MAC && matches!(device.device_auth, DeviceAuthRef::Mac(_)) {
             return Err(MdocError::DeviceAuth(
                 "presentation verification requires DeviceSignature".into(),
             ));
-        };
+        }
         let IssuerEvidence {
             mso,
             certificates,
@@ -184,36 +256,16 @@ fn verify_presentation_borrowed_inner<'a>(
             }
             check_key_authorizations(&mso.device_key_info, namespace, elements.keys().copied())?;
         }
-        if signature.payload.is_some() {
-            return Err(MdocError::DeviceAuth(
-                "deviceSignature must use a detached payload".into(),
-            ));
-        }
         let payload = crate::session::DeviceAuthentication::new(
             transcript,
             document.doc_type,
             device.name_spaces_bytes,
         );
-        let framing =
-            crate::cose::AuthenticationStructure::sign1(signature.protected.len(), payload.len());
-        let parts = payload.authentication_parts(framing.prefix(signature.protected));
-        let is_valid = crate::cose::validate_borrowed_headers(
-            &signature.protected_header,
-            &signature.unprotected,
-        )
-        .and_then(|algorithm| {
-            crate::cose::verify_cose_signature_borrowed(
-                &parts,
-                signature.signature,
-                &mso.device_key_info.device_key,
-                algorithm,
-            )
-        })
-        .map_err(|error| MdocError::DeviceAuth(error.to_string()))?;
-        if !is_valid {
-            return Err(MdocError::DeviceAuth(
-                "holder signature does not match session".into(),
-            ));
+        match &device.device_auth {
+            DeviceAuthRef::Signature(signature) => {
+                verify_holder_signature(signature, &mso.device_key_info.device_key, &payload)?
+            }
+            DeviceAuthRef::Mac(mac) => verify_mac(&mso.device_key_info.device_key, mac, &payload)?,
         }
         validate_claims(&document, &mso, options.now, certificate_interval)?;
         #[cfg(feature = "certificate-profile")]
@@ -227,6 +279,38 @@ fn verify_presentation_borrowed_inner<'a>(
         });
     }
     Ok(verified)
+}
+
+fn verify_holder_signature(
+    signature: &CoseSign1Ref<'_>,
+    device_key: &CoseKeyRef<'_>,
+    payload: &crate::session::DeviceAuthentication<'_>,
+) -> Result<(), MdocError> {
+    if signature.payload.is_some() {
+        return Err(MdocError::DeviceAuth(
+            "deviceSignature must use a detached payload".into(),
+        ));
+    }
+    let framing =
+        crate::cose::AuthenticationStructure::sign1(signature.protected.len(), payload.len());
+    let parts = payload.authentication_parts(framing.prefix(signature.protected));
+    let is_valid =
+        crate::cose::validate_borrowed_headers(&signature.protected_header, &signature.unprotected)
+            .and_then(|algorithm| {
+                crate::cose::verify_cose_signature_borrowed(
+                    &parts,
+                    signature.signature,
+                    device_key,
+                    algorithm,
+                )
+            })
+            .map_err(|error| MdocError::DeviceAuth(error.to_string()))?;
+    if !is_valid {
+        return Err(MdocError::DeviceAuth(
+            "holder signature does not match session".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Issuer-only authentication for credentials before presentation.

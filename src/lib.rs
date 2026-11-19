@@ -1,4 +1,4 @@
-//! ISO mdoc issuance, parsing and signature verification.
+//! ISO mdoc issuance, parsing and authenticated presentation protocols.
 //!
 //! `parse_borrowed` reads untrusted wire data without copying its values.
 //! `verify_presentation_borrowed` authenticates issuer/holder signatures and
@@ -7,6 +7,10 @@
 //! The application completes issuer X.509 trust, certificate revocation, MSO
 //! status, request freshness and authorization. The `issue` feature prepares
 //! immutable signing inputs and verifies externally returned signatures.
+//! The `reader` module prepares device-retrieval requests and reads protocol
+//! errors. `reader-session` adds ordered encrypted reader sessions with external
+//! ECDH and DeviceMAC verification. `reader-crypto` adds native Brainpool and
+//! Ed448 signature verification; the default backend stays portable Rust.
 //!
 //! The protocol matrix documents supported algorithms, wire formats and tests.
 
@@ -26,6 +30,7 @@ pub mod error;
 pub mod mdl;
 pub mod model;
 pub mod parser;
+pub mod reader;
 #[cfg(feature = "issue")]
 pub mod response_builder;
 pub mod session;

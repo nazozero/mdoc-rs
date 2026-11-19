@@ -26,6 +26,7 @@ jobs:
       - run: cargo build --locked --all-features
       - run: cargo test --locked --no-default-features
       - run: cargo test --locked --no-default-features --features issue
+      - run: cargo test --locked --no-default-features --features reader-session
       - run: cargo test --locked --all-features
       - run: cargo clippy --locked --all-features --all-targets -- -D warnings
       - run: cargo doc --locked --all-features --no-deps
@@ -42,8 +43,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown, wasm32-wasip2
       - run: cargo build --locked --no-default-features --target wasm32-unknown-unknown
-      - run: cargo build --locked --no-default-features --features issue,wasm-js,certificate-profile --target wasm32-unknown-unknown
-      - run: cargo build --locked --no-default-features --features issue,certificate-profile --target wasm32-wasip2
+      - run: cargo build --locked --all-features --target wasm32-unknown-unknown
+      - run: cargo build --locked --all-features --target wasm32-wasip2
   advisories:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -66,3 +67,4 @@ jobs:
       - run: python3 fuzz/seed.py
       - run: cargo +nightly fuzz run decode -- -max_total_time=120 -timeout=5 -max_len=65536 -rss_limit_mb=2048
       - run: cargo +nightly fuzz run certificate -- -max_total_time=60 -timeout=5 -max_len=65536 -rss_limit_mb=2048
+      - run: cargo +nightly fuzz run reader_session -- -max_total_time=120 -timeout=5 -max_len=65536 -rss_limit_mb=2048

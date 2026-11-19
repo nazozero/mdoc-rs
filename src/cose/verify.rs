@@ -1,6 +1,6 @@
-//! COSE signature verification using RustCrypto.
+//! COSE signature verification with explicit curve and operation binding.
 
-use crate::cose::key::algorithms;
+use crate::cose::key::{SignatureCurve, algorithms};
 use crate::error::MdocError;
 use crate::model::{CoseKeyRef, CoseLabelRef};
 #[cfg(any(not(feature = "certificate-profile"), test))]
@@ -10,6 +10,7 @@ use signature::MultipartVerifier;
 /// Verify a COSE signature given the to-be-signed data, signature bytes, and a COSE_Key.
 ///
 /// Supports ES256 (P-256), ES384 (P-384), ES512 (P-521), and EdDSA (Ed25519).
+/// On native targets `reader-crypto` adds the ISO Brainpool curves and Ed448.
 pub fn verify_cose_signature(
     tbs_data: &[u8],
     signature: &[u8],
@@ -45,15 +46,17 @@ pub(crate) enum VerificationKey {
     P384(p384::ecdsa::VerifyingKey),
     P521(p521::ecdsa::VerifyingKey),
     Ed25519(ed25519_dalek::VerifyingKey),
+    #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+    Extended(super::openssl_backend::ExtendedVerificationKey),
 }
 
 impl VerificationKey {
     pub(crate) fn from_cose(key: &coset::CoseKey, alg: i64) -> Result<Self, MdocError> {
-        Self::from_parts(owned_key_parts(key, alg)?, alg)
+        Self::from_parts(owned_key_parts(key, alg)?)
     }
 
     pub(crate) fn from_borrowed(key: &CoseKeyRef<'_>, alg: i64) -> Result<Self, MdocError> {
-        Self::from_parts(borrowed_key_parts(key, alg)?, alg)
+        Self::from_parts(borrowed_key_parts(key, alg)?)
     }
 
     #[cfg(any(not(feature = "certificate-profile"), test))]
@@ -68,55 +71,69 @@ impl VerificationKey {
         spki: x509_cert::spki::SubjectPublicKeyInfoRef<'_>,
         alg: i64,
     ) -> Result<Self, MdocError> {
-        let (key_alg, bytes) = super::key::spki_key_bytes(spki)?;
-        if key_alg != alg {
+        let (curve, bytes) = super::key::spki_key_bytes(spki)?;
+        if curve.algorithm() != alg {
             return Err(MdocError::Cose("algorithm/key type/curve mismatch".into()));
         }
-        Self::from_bytes(bytes, alg)
+        Self::from_bytes(bytes, curve)
     }
 
-    fn from_parts(parts: PublicKeyParts<'_>, alg: i64) -> Result<Self, MdocError> {
+    fn from_parts(parts: PublicKeyParts<'_>) -> Result<Self, MdocError> {
         match parts.y {
-            Some(y) => {
+            Some(YCoordinate::Full(y)) => {
                 // Coordinate widths were checked by the metadata parser.
                 let mut point = [0; 133];
                 let width = parts.x.len();
                 point[0] = 4;
                 point[1..1 + width].copy_from_slice(parts.x);
                 point[1 + width..1 + 2 * width].copy_from_slice(y);
-                Self::from_bytes(&point[..1 + 2 * width], alg)
+                Self::from_bytes(&point[..1 + 2 * width], parts.curve)
             }
-            None => Self::from_bytes(parts.x, alg),
+            Some(YCoordinate::Parity(odd)) => {
+                let mut point = [0; 67];
+                point[0] = 2 | u8::from(odd);
+                point[1..1 + parts.x.len()].copy_from_slice(parts.x);
+                Self::from_bytes(&point[..1 + parts.x.len()], parts.curve)
+            }
+            None => Self::from_bytes(parts.x, parts.curve),
         }
     }
 
-    fn from_bytes(bytes: &[u8], alg: i64) -> Result<Self, MdocError> {
-        match alg {
-            algorithms::ES256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
+    fn from_bytes(bytes: &[u8], curve: SignatureCurve) -> Result<Self, MdocError> {
+        match curve {
+            SignatureCurve::P256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
                 .map(Self::P256)
                 .map_err(|e| MdocError::Signature(format!("P-256 key: {e}"))),
-            algorithms::ES384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
+            SignatureCurve::P384 => p384::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
                 .map(Self::P384)
                 .map_err(|e| MdocError::Signature(format!("P-384 key: {e}"))),
-            algorithms::ES512 => p521::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
+            SignatureCurve::P521 => p521::ecdsa::VerifyingKey::from_sec1_bytes(bytes)
                 .map(Self::P521)
                 .map_err(|e| MdocError::Signature(format!("P-521 key: {e}"))),
-            algorithms::EDDSA => ed25519_dalek::VerifyingKey::from_bytes(
+            SignatureCurve::Ed25519 => ed25519_dalek::VerifyingKey::from_bytes(
                 bytes
                     .try_into()
                     .map_err(|_| MdocError::Signature("Ed25519 key length".into()))?,
             )
             .map(Self::Ed25519)
             .map_err(|e| MdocError::Signature(format!("Ed25519 key: {e}"))),
-            _ => Err(MdocError::UnsupportedAlgorithm(format!(
-                "COSE algorithm {alg}"
-            ))),
+            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+            curve => super::openssl_backend::ExtendedVerificationKey::from_bytes(bytes, curve)
+                .map(Self::Extended),
+            #[cfg(not(all(feature = "reader-crypto", not(target_family = "wasm"))))]
+            _ => Err(MdocError::UnsupportedAlgorithm(
+                "curve requires reader-crypto on a native target".into(),
+            )),
         }
     }
 
     pub(super) fn validate_device_point(&self) -> Result<(), MdocError> {
         if matches!(self, Self::Ed25519(key) if key.is_weak()) {
             return Err(MdocError::Cose("invalid device public point".into()));
+        }
+        #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+        if let Self::Extended(key) = self {
+            key.validate_device_point()?;
         }
         Ok(())
     }
@@ -127,6 +144,8 @@ impl VerificationKey {
             Self::P384(_) => ("ES384", 96),
             Self::P521(_) => ("ES512", 132),
             Self::Ed25519(_) => ("Ed25519", 64),
+            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+            Self::Extended(key) => return key.verify(parts, signature),
         };
         if signature.len() != signature_len {
             if matches!(self, Self::Ed25519(_)) {
@@ -169,22 +188,28 @@ impl VerificationKey {
                 };
                 Ok(key.verify_strict(bytes, &signature).is_ok())
             }
+            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+            Self::Extended(_) => unreachable!("extended verification returned above"),
         }
     }
 }
 
 struct PublicKeyParts<'a> {
+    curve: SignatureCurve,
     x: &'a [u8],
-    y: Option<&'a [u8]>,
+    y: Option<YCoordinate<'a>>,
 }
 
-fn algorithm_parameters(alg: i64) -> Result<(coset::iana::KeyType, i128, usize), MdocError> {
+enum YCoordinate<'a> {
+    Full(&'a [u8]),
+    Parity(bool),
+}
+
+fn algorithm_key_type(alg: i64) -> Result<coset::iana::KeyType, MdocError> {
     use coset::iana::KeyType;
     match alg {
-        algorithms::ES256 => Ok((KeyType::EC2, 1, 32)),
-        algorithms::ES384 => Ok((KeyType::EC2, 2, 48)),
-        algorithms::ES512 => Ok((KeyType::EC2, 3, 66)),
-        algorithms::EDDSA => Ok((KeyType::OKP, 6, 32)),
+        algorithms::ES256 | algorithms::ES384 | algorithms::ES512 => Ok(KeyType::EC2),
+        algorithms::EDDSA => Ok(KeyType::OKP),
         _ => Err(MdocError::UnsupportedAlgorithm(format!(
             "COSE algorithm {alg}"
         ))),
@@ -198,7 +223,7 @@ pub fn validate_verification_key(key: &coset::CoseKey, alg: i64) -> Result<(), M
 
 fn owned_key_parts(key: &coset::CoseKey, alg: i64) -> Result<PublicKeyParts<'_>, MdocError> {
     use coset::{Algorithm, KeyOperation, KeyType, Label, iana};
-    let (key_type, curve, coordinate_len) = algorithm_parameters(alg)?;
+    let key_type = algorithm_key_type(alg)?;
     if key.kty != KeyType::Assigned(key_type) {
         return Err(MdocError::Cose("algorithm/key type/curve mismatch".into()));
     }
@@ -228,16 +253,16 @@ fn owned_key_parts(key: &coset::CoseKey, alg: i64) -> Result<PublicKeyParts<'_>,
                 },
                 value.as_integer().map(i128::from),
                 value.as_bytes().map(Vec::as_slice),
+                value.as_bool(),
             )
         }),
-        curve,
-        coordinate_len,
+        alg,
         key_type == iana::KeyType::EC2,
     )
 }
 
 fn borrowed_key_parts<'a>(key: &CoseKeyRef<'a>, alg: i64) -> Result<PublicKeyParts<'a>, MdocError> {
-    let (key_type, curve, coordinate_len) = algorithm_parameters(alg)?;
+    let key_type = algorithm_key_type(alg)?;
     if key.kty != CoseLabelRef::Int(key_type as i64) {
         return Err(MdocError::Cose("algorithm/key type/curve mismatch".into()));
     }
@@ -268,10 +293,10 @@ fn borrowed_key_parts<'a>(key: &CoseKeyRef<'a>, alg: i64) -> Result<PublicKeyPar
                 },
                 value.as_integer(),
                 value.as_bytes(),
+                value.as_bool(),
             )
         }),
-        curve,
-        coordinate_len,
+        alg,
         key_type == coset::iana::KeyType::EC2,
     )
 }
@@ -279,14 +304,15 @@ fn borrowed_key_parts<'a>(key: &CoseKeyRef<'a>, alg: i64) -> Result<PublicKeyPar
 /// Shared validation reads only the metadata and coordinate slices; neither
 /// the owned nor borrowed model needs a second COSE key or a CBOR value tree.
 fn public_key_parts<'a>(
-    params: impl Iterator<Item = (Option<i64>, Option<i128>, Option<&'a [u8]>)>,
-    curve: i128,
-    coordinate_len: usize,
+    params: impl Iterator<Item = (Option<i64>, Option<i128>, Option<&'a [u8]>, Option<bool>)>,
+    alg: i64,
     ec2: bool,
 ) -> Result<PublicKeyParts<'a>, MdocError> {
     let mut labels = 0u8;
-    let mut result = PublicKeyParts { x: &[], y: None };
-    for (label, integer, bytes) in params {
+    let mut curve = None;
+    let mut x = None;
+    let mut y = None;
+    for (label, integer, bytes, boolean) in params {
         let bit = match label {
             Some(-1) => 1,
             Some(-2) => 2,
@@ -302,18 +328,13 @@ fn public_key_parts<'a>(
         }
         labels |= bit;
         if bit == 1 {
-            if integer != Some(curve) {
-                return Err(MdocError::Cose("algorithm/key type/curve mismatch".into()));
-            }
+            curve = integer;
+        } else if bit == 2 {
+            x = bytes;
         } else {
-            let bytes = bytes
-                .filter(|bytes| bytes.len() == coordinate_len)
-                .ok_or_else(|| MdocError::Cose("invalid COSE_Key coordinate length/type".into()))?;
-            if bit == 2 {
-                result.x = bytes;
-            } else {
-                result.y = Some(bytes);
-            }
+            y = bytes
+                .map(YCoordinate::Full)
+                .or_else(|| boolean.map(YCoordinate::Parity));
         }
     }
     if labels != if ec2 { 7 } else { 3 } {
@@ -321,7 +342,34 @@ fn public_key_parts<'a>(
             "missing required COSE_Key coordinate".into(),
         ));
     }
-    Ok(result)
+    let curve = SignatureCurve::from_id(
+        curve.ok_or_else(|| MdocError::Cose("invalid signature curve".into()))?,
+    )?;
+    if curve.algorithm() != alg || (curve.key_type() == coset::iana::KeyType::EC2) != ec2 {
+        return Err(MdocError::Cose("algorithm/key type/curve mismatch".into()));
+    }
+    let coordinate = |bytes: Option<&'a [u8]>| {
+        bytes
+            .filter(|bytes| bytes.len() == curve.width())
+            .ok_or_else(|| MdocError::Cose("invalid COSE_Key coordinate length/type".into()))
+    };
+    Ok(PublicKeyParts {
+        curve,
+        x: coordinate(x)?,
+        y: if ec2 {
+            Some(match y {
+                Some(YCoordinate::Parity(odd)) => YCoordinate::Parity(odd),
+                Some(YCoordinate::Full(bytes)) => YCoordinate::Full(coordinate(Some(bytes))?),
+                None => {
+                    return Err(MdocError::Cose(
+                        "invalid COSE_Key coordinate length/type".into(),
+                    ));
+                }
+            })
+        } else {
+            None
+        },
+    })
 }
 
 #[cfg(test)]
@@ -515,6 +563,21 @@ mod tests {
         let parts = [&message[..3], &message[3..8], &message[8..]];
         assert!(verify_cose_signature_parts(&parts, signature, key, alg).unwrap());
         assert!(verify_cose_signature_borrowed(&parts, signature, &borrowed, alg).unwrap());
+        if key.kty == coset::KeyType::Assigned(coset::iana::KeyType::EC2) {
+            let mut compressed = key.clone();
+            let y = &mut compressed
+                .params
+                .iter_mut()
+                .find(|(label, _)| *label == coset::Label::Int(-3))
+                .unwrap()
+                .1;
+            *y = ciborium::Value::Bool(y.as_bytes().unwrap().last().unwrap() & 1 == 1);
+            assert!(verify_cose_signature_parts(&parts, signature, &compressed, alg).unwrap());
+            let encoded = compressed.to_vec().unwrap();
+            let borrowed =
+                CoseKeyRef::parse(crate::cbor::raw::Item::parse(&encoded).unwrap()).unwrap();
+            assert!(verify_cose_signature_borrowed(&parts, signature, &borrowed, alg).unwrap());
+        }
         let algorithm = if alg == algorithms::EDDSA {
             x509_cert::spki::AlgorithmIdentifierOwned {
                 oid: const_oid::ObjectIdentifier::new_unwrap("1.3.101.112"),
@@ -630,3 +693,7 @@ mod tests {
         assert!(super::super::validate_borrowed_device_public_key(&borrowed).is_err());
     }
 }
+
+#[cfg(all(test, feature = "reader-crypto", not(target_family = "wasm")))]
+#[path = "reader_crypto_tests.rs"]
+mod reader_crypto_tests;

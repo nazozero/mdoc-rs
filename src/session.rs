@@ -15,6 +15,9 @@ use sha2::{Digest, Sha256};
 use crate::cbor::raw::{self, cbor_head};
 use crate::error::MdocError;
 
+#[cfg(feature = "reader-session")]
+pub mod reader;
+
 const REDIRECT_PREFIX: &[u8] = b"\x83\xf6\xf6\x82\x71OpenID4VPHandover\x58\x20";
 const DC_API_PREFIX: &[u8] = b"\x83\xf6\xf6\x82\x76OpenID4VPDCAPIHandover\x58\x20";
 const DEVICE_AUTHENTICATION_PREFIX: &[u8] = b"\x84\x74DeviceAuthentication";
@@ -32,6 +35,9 @@ pub enum SessionBinding {
     OpenId4VpRedirect,
     /// Bound to the supplied OpenID4VP Final Digital Credentials API context.
     OpenId4VpDcApi,
+    /// Built from the received ISO device engagement, reader ephemeral key and handover.
+    #[cfg(feature = "reader-session")]
+    DeviceRetrieval,
 }
 
 /// Exact, validated CBOR bytes of a session transcript.
@@ -415,15 +421,19 @@ pub fn derive_ephemeral_mac_key_for(
             "ECDH shared secret must not be empty".into(),
         ));
     }
-    let (head, len) = cbor_head(2, transcript.as_bytes().len() as u64);
-    let mut salt = Sha256::new();
-    salt.update(TAG24);
-    salt.update(&head[..len]);
-    salt.update(transcript.as_bytes());
-    let salt = salt.finalize();
+    let salt = transcript_salt(transcript);
     let hkdf = hkdf::Hkdf::<Sha256>::new(Some(&salt), shared_secret);
     let mut key = [0; 32];
     hkdf.expand(b"EMacKey", &mut key)
         .map_err(|error| MdocError::Session(format!("HKDF expand: {error}")))?;
     Ok(key)
+}
+
+fn transcript_salt(transcript: &SessionTranscript<'_>) -> [u8; 32] {
+    let (head, len) = cbor_head(2, transcript.as_bytes().len() as u64);
+    let mut salt = Sha256::new();
+    salt.update(TAG24);
+    salt.update(&head[..len]);
+    salt.update(transcript.as_bytes());
+    salt.finalize().into()
 }
