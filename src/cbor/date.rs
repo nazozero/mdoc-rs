@@ -13,27 +13,26 @@ pub const TAG_FULL_DATE: u64 = 1004;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FullDate(String);
 
-impl FullDate {
+/// A validated full-date that borrows the caller's string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FullDateRef<'a>(&'a str);
+
+impl<'a> FullDateRef<'a> {
     /// Create a new FullDate from a string.
+    pub fn new(date: &'a str) -> Result<Self, MdocError> {
+        parse_full_date(date)?;
+        Ok(Self(date))
+    }
+
+    pub fn as_str(self) -> &'a str {
+        self.0
+    }
+}
+
+impl FullDate {
+    /// Validate the calendar date before allocating independent storage.
     pub fn new(date: &str) -> Result<Self, MdocError> {
-        use ::time::format_description::{BorrowedFormatItem, Component, modifier};
-        let format = [
-            BorrowedFormatItem::Component(Component::CalendarYearFullStandardRange(
-                modifier::CalendarYearFullStandardRange::default(),
-            )),
-            BorrowedFormatItem::StringLiteral("-"),
-            BorrowedFormatItem::Component(Component::MonthNumerical(
-                modifier::MonthNumerical::default(),
-            )),
-            BorrowedFormatItem::StringLiteral("-"),
-            BorrowedFormatItem::Component(Component::Day(modifier::Day::default())),
-        ];
-        // Fixed-width components validate digits, separators and calendar values.
-        // The length also excludes the parser's optional year sign.
-        if date.len() != 10 || ::time::Date::parse(date, &format[..]).is_err() {
-            return Err(MdocError::Cbor("invalid full-date".into()));
-        }
-        Ok(Self(date.to_owned()))
+        Ok(Self(FullDateRef::new(date)?.as_str().to_owned()))
     }
 
     /// Get the date string.
@@ -63,15 +62,87 @@ impl FullDate {
     }
 }
 
+/// Validate ISO/IEC 18013-5:2021 §7.2.1 date strings without allocating.
+/// Tag 1004 is a full-date; Tag 0 uses whole UTC seconds, including a
+/// representable RFC 3339 leap second and case-insensitive `T`/`Z` letters.
+/// The caller chooses the permitted tag for the specific field; other tags
+/// are rejected.
+pub fn validate_date_tag(tag: u64, text: &str) -> Result<(), MdocError> {
+    match tag {
+        TAG_FULL_DATE => FullDateRef::new(text).map(|_| ()),
+        0 => parse_tdate(text).map(|_| ()),
+        _ => Err(MdocError::Cbor(
+            "invalid ISO date tag or representation".into(),
+        )),
+    }
+}
+
 impl std::fmt::Display for FullDate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
+pub(crate) fn parse_full_date(date: &str) -> Result<::time::Date, MdocError> {
+    use ::time::format_description::{BorrowedFormatItem, Component, modifier};
+    let format = [
+        BorrowedFormatItem::Component(Component::CalendarYearFullStandardRange(
+            modifier::CalendarYearFullStandardRange::default(),
+        )),
+        BorrowedFormatItem::StringLiteral("-"),
+        BorrowedFormatItem::Component(Component::MonthNumerical(
+            modifier::MonthNumerical::default(),
+        )),
+        BorrowedFormatItem::StringLiteral("-"),
+        BorrowedFormatItem::Component(Component::Day(modifier::Day::default())),
+    ];
+    // Fixed-width components validate digits, separators and calendar values.
+    // The length also excludes the parser's optional year sign.
+    if date.len() != 10 {
+        return Err(MdocError::Cbor("invalid full-date".into()));
+    }
+    ::time::Date::parse(date, &format[..]).map_err(|_| MdocError::Cbor("invalid full-date".into()))
+}
+
+pub(crate) fn parse_tdate(text: &str) -> Result<crate::Timestamp, MdocError> {
+    if text.len() != 20 || !matches!(text.as_bytes().last(), Some(b'Z' | b'z')) {
+        return Err(MdocError::Cbor(
+            "ISO date requires whole UTC seconds".into(),
+        ));
+    }
+    crate::Timestamp::parse_rfc3339(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tdate_accepts_rfc3339_letter_case_and_retains_iso_time_restrictions() {
+        for text in [
+            "2026-11-17T12:00:00Z",
+            "2026-11-17t12:00:00Z",
+            "2026-11-17T12:00:00z",
+            "2026-11-17t12:00:00z",
+        ] {
+            validate_date_tag(0, text).unwrap();
+            assert_eq!(
+                parse_tdate(text).unwrap().format_rfc3339().unwrap(),
+                "2026-11-17T12:00:00Z"
+            );
+        }
+        for text in [
+            "2026-11-17T12:00:00.0Z",
+            "2026-11-17t12:00:00.0z",
+            "2026-11-17T12:00:00+00:00",
+            "2026-11-17t12:00:00-00:00",
+            "2026-11-17 12:00:00Z",
+            "2026-11-17X12:00:00Z",
+            "2026-11-17T12:00:00",
+        ] {
+            assert!(validate_date_tag(0, text).is_err(), "accepted {text}");
+        }
+    }
 
     #[test]
     fn full_date_round_trip() {

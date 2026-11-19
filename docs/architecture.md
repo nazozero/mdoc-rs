@@ -14,6 +14,9 @@ transport.
 3. `verifier` authenticates the issuer signature using the leaf certificate key,
    decodes the signed MSO, authenticates the holder against the supplied
    transcript, then checks disclosure digests, authorizations and validity.
+   With `certificate-profile`, DS profile validation is mandatory at this
+   boundary. ISO mDL supplied fields and issuer-only placement are checked in
+   every feature configuration.
 4. `PendingTrustDocumentRef` exposes immutable authenticated views and leaf-first
    certificate slices. The application checks issuer trust, certificate
    revocation, credential status, request freshness and authorization.
@@ -37,7 +40,8 @@ use either a synchronous local signer or an asynchronous external signer without
 introducing a signing service into the library.
 
 Attributes retain the caller's CBOR types. Namespace-specific schema mapping
-belongs to the application. Issuance uses deterministic CBOR; wire encoders copy
+belongs to the application; `mdl` validates supplied standard mDL encodings.
+Issuance uses deterministic CBOR; wire encoders copy
 already signed fields verbatim.
 
 ## Ownership
@@ -62,6 +66,10 @@ already signed fields verbatim.
 - The upstream X.509 decoder owns its decoded certificate fields. Issuer public
   points go directly from SPKI to the cryptographic verification key. Prepared
   signing operations retain that key rather than rebuilding a COSE key.
+  The optional profile feature also retains a borrowed `x509-parser` leaf view
+  for extension checks and host reuse. Strict `x509-cert` decoding remains
+  necessary because the borrowed parser accepts some BER and inner trailing
+  fields. This extra parse is a correctness cost, not another path engine.
 - Issuance moves attributes into the result and encodes item and MSO Tag 24
   envelopes directly into their final buffers. Digests use stack outputs;
   namespace sorting retains references. Holder preparation writes one final
@@ -82,6 +90,12 @@ The library checks MSO validity and containment of the signed time within the
 leaf certificate interval. The application validates the X.509 path at its
 verification time and evaluates certificate revocation and credential status.
 URI parsing checks syntax; the application's fetch policy governs network use.
+
+The `certificate` module owns ISO profile rules. The application owns root
+selection, certificate signatures, path validity, current time and revocation.
+Link-profile validation takes authenticated old-root and corresponding new-root
+evidence; name equality alone is not proof that a certificate is self-signed.
+No tenant, account, session, storage or HTTP types enter the library.
 
 `verify_presentation` selects DeviceSignature and verifies every document
 atomically. Callers set a document limit appropriate to their presentation

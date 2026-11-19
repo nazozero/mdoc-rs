@@ -10,7 +10,7 @@ use nazo_mdoc::{
     model::{DeviceAuth, IssuerSignedDocument},
     response_builder::prepare_device_authentication,
 };
-use signature::Signer;
+use signature::{Signer, Verifier};
 
 const EMPTY_NAMESPACES: &[u8] = &[0xd8, 0x18, 0x41, 0xa0];
 
@@ -194,6 +194,71 @@ fn authorized_device_namespace_is_signed_and_encoded_without_reordering_raw_map(
             .unwrap(),
         1.into()
     );
+}
+
+#[test]
+fn table_five_elements_cannot_be_device_signed_even_with_issuer_authorization() {
+    for (namespace, name, allowed) in [
+        (NS, "family_name", false),
+        (NS, "age_over_21", false),
+        (NS, "biometric_template_face", false),
+        ("domestic.example", "family_name", true),
+        (NS, "future_extension", true),
+    ] {
+        let mut document = with_authorizations(
+            issue(builder()),
+            Value::Map(vec![(
+                "nameSpaces".into(),
+                Value::Array(vec![namespace.into()]),
+            )]),
+        );
+        let namespaces = tagged(&Value::Map(vec![(
+            namespace.into(),
+            Value::Map(vec![(name.into(), "device claim".into())]),
+        )]));
+        assert_eq!(
+            prepare_device_authentication(document.clone(), &transcript(), namespaces.clone(), -7)
+                .is_ok(),
+            allowed,
+        );
+        // Bypass the preparation API. Both issuer and holder signatures remain
+        // valid, including the issuer's explicit namespace authorization.
+        let auth = &document.issuer_signed.issuer_auth.cose_sign1;
+        issuer_key()
+            .verifying_key()
+            .verify(
+                &auth.tbs_data(&[]),
+                &p256::ecdsa::Signature::from_slice(&auth.signature).unwrap(),
+            )
+            .unwrap();
+        let payload =
+            nazo_mdoc::session::build_device_authentication(&transcript(), DOC_TYPE, &namespaces)
+                .unwrap();
+        let mut proof = coset::CoseSign1Builder::new()
+            .protected(
+                coset::HeaderBuilder::new()
+                    .algorithm(coset::iana::Algorithm::ES256)
+                    .build(),
+            )
+            .payload(payload)
+            .create_signature(&[], |input| {
+                let signature: p256::ecdsa::Signature = holder_key().sign(input);
+                holder_key()
+                    .verifying_key()
+                    .verify(input, &signature)
+                    .unwrap();
+                signature.to_bytes().to_vec()
+            })
+            .build();
+        proof.payload = None;
+        document.device_signed = Some(nazo_mdoc::model::DeviceSigned {
+            device_auth: DeviceAuth::Signature(proof),
+            name_spaces: Default::default(),
+            name_spaces_bytes: namespaces,
+        });
+        let result = verify(&document.to_device_response_cbor().unwrap());
+        assert_eq!(result.is_ok(), allowed, "{namespace}/{name}: {result:?}");
+    }
 }
 
 #[test]

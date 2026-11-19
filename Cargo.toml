@@ -1,6 +1,6 @@
 [package]
 name = "nazo-mdoc"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["NazoZero", "Kushal Das"]
 edition = "2024"
 rust-version = "1.100"
@@ -17,6 +17,7 @@ default = []
 issue = ["dep:getrandom"]
 debug = []
 wasm-js = ["getrandom?/wasm_js"]
+certificate-profile = ["dep:sha1", "dep:x509-parser"]
 
 [dependencies]
 ciborium = "0.2.2"
@@ -33,10 +34,12 @@ p384 = { version = "0.14.0", default-features = false, features = ["ecdsa", "all
 p521 = { version = "0.14.0", default-features = false, features = ["ecdsa", "alloc"] }
 serde = { version = "1.0.229", features = ["derive"] }
 sha2 = "0.11.1"
+sha1 = { version = "0.11.0", optional = true }
 signature = "3.0.0"
 thiserror = "2.0.21"
 time = { version = "0.3.55", default-features = false, features = ["std", "parsing", "formatting"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std", "pem"] }
+x509-parser = { version = "0.18.1", default-features = false, optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"

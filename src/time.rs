@@ -30,6 +30,10 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
+    pub(crate) fn date(self) -> ::time::Date {
+        self.utc.date()
+    }
+
     /// Construct an ordinary instant from Unix seconds, rejecting unsupported years.
     pub fn from_unix_seconds(seconds: i64) -> Result<Self, MdocError> {
         let utc = UtcDateTime::from_unix_timestamp(seconds)
@@ -46,17 +50,17 @@ impl Timestamp {
 
     /// Parse a bounded RFC 3339 timestamp and normalize its offset to UTC.
     ///
-    /// This protocol API requires an uppercase `T` separator and at most nine
-    /// fractional digits. Extra digits reject to preserve interval precision.
+    /// Accepts `T`/`t` separators and `Z`/`z` UTC designators (RFC 3339 §5.6).
+    /// At most nine fractional digits preserve interval precision; more reject.
     /// Ordinary fractional seconds are retained. Positive leap seconds must be
     /// whole seconds; fractional leap seconds are outside this protocol type.
     /// The `time` parser validates the calendar and possible UTC leap-second
     /// position; checking an actual occurrence requires an external schedule.
     pub fn parse_rfc3339(text: &str) -> Result<Self, MdocError> {
         let bytes = text.as_bytes();
-        if !(20..=35).contains(&bytes.len()) || bytes.get(10) != Some(&b'T') {
+        if !(20..=35).contains(&bytes.len()) || !matches!(bytes.get(10), Some(b'T' | b't')) {
             return Err(invalid(
-                "timestamps require bounded RFC 3339 with a T separator",
+                "timestamps require bounded RFC 3339 with a T/t separator",
             ));
         }
         if bytes.get(19) == Some(&b'.') {
@@ -92,7 +96,7 @@ impl Timestamp {
         Self::checked(utc, leap_second)
     }
 
-    /// Format UTC RFC 3339, preserving a whole leap second as `:60Z`.
+    /// Format UTC RFC 3339 with uppercase `T`/`Z`, preserving a whole leap second as `:60Z`.
     pub fn format_rfc3339(self) -> Result<String, MdocError> {
         let mut text = self
             .utc
@@ -219,11 +223,32 @@ mod tests {
     }
 
     #[test]
+    fn rfc3339_letters_are_case_insensitive_and_format_as_uppercase() {
+        for canonical in [
+            "2026-11-17T12:00:00Z",
+            "2026-11-17T12:00:00.123456789Z",
+            "2016-12-31T23:59:60Z",
+        ] {
+            let expected = parse(canonical);
+            for (separator, utc) in [("T", "Z"), ("t", "Z"), ("T", "z"), ("t", "z")] {
+                let text = canonical.replace('T', separator).replace('Z', utc);
+                let timestamp = parse(&text);
+                assert_eq!(timestamp, expected);
+                assert_eq!(timestamp.format_rfc3339().unwrap(), canonical);
+            }
+        }
+        assert_eq!(
+            parse("2026-11-17t13:00:00+01:00"),
+            parse("2026-11-17T12:00:00Z")
+        );
+    }
+
+    #[test]
     fn calendar_and_unsupported_leap_inputs_fail_closed() {
         for text in [
             "2026-11-17X12:00:00Z",
             "2026-11-17\0",
-            "2026-11-17t12:00:00Z",
+            "2026-11-17 12:00:00Z",
             "2026-11-17\u{0000}12:00:00Z",
             "2026-11-17T12:00:00.0000000001Z",
             "2026-11-17T12:00:00.0000000000Z",

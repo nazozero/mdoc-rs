@@ -13,6 +13,8 @@
 #[cfg(feature = "issue")]
 pub mod builder;
 pub mod cbor;
+#[cfg(feature = "certificate-profile")]
+pub mod certificate;
 pub mod cose;
 pub mod device_auth;
 #[cfg(feature = "debug")]
@@ -21,6 +23,7 @@ pub mod disclosure;
 #[cfg(feature = "issue")]
 pub mod encoder;
 pub mod error;
+pub mod mdl;
 pub mod model;
 pub mod parser;
 #[cfg(feature = "issue")]

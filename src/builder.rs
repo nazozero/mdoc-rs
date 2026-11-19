@@ -1,6 +1,7 @@
 //! Document builder for mdoc issuance (feature: `issue`).
 
 use coset::{AsCborValue, iana};
+#[cfg(not(feature = "certificate-profile"))]
 use der::Decode;
 use std::collections::{HashMap, HashSet};
 
@@ -169,13 +170,25 @@ impl DocumentBuilder {
         if certificate_chain.is_empty() || certificate_chain.iter().any(Vec::is_empty) {
             return Err(MdocError::Issuance("nonempty x5chain is required".into()));
         }
+        #[cfg(not(feature = "certificate-profile"))]
         let leaf = x509_cert::Certificate::from_der(&certificate_chain[0])
             .map_err(|e| MdocError::Certificate(e.to_string()))?;
+        #[cfg(not(feature = "certificate-profile"))]
         let issuer_key = crate::cose::VerificationKey::from_spki(
             leaf.tbs_certificate().subject_public_key_info(),
             algorithm.cose_id(),
         )?;
+        #[cfg(not(feature = "certificate-profile"))]
         let interval = crate::verifier::certificate_interval(&leaf)?;
+        #[cfg(feature = "certificate-profile")]
+        let leaf = crate::certificate::parse_document_signer(&certificate_chain[0])?;
+        #[cfg(feature = "certificate-profile")]
+        let issuer_key = crate::cose::VerificationKey::from_spki_ref(
+            crate::certificate::spki(&leaf)?,
+            algorithm.cose_id(),
+        )?;
+        #[cfg(feature = "certificate-profile")]
+        let interval = crate::certificate::interval(&leaf)?;
         if validity.signed < interval.0 || validity.signed > interval.1 {
             return Err(MdocError::Validity(
                 "MSO signed time outside issuer certificate validity".into(),
@@ -200,7 +213,23 @@ impl DocumentBuilder {
             for (elem_id, elem_value) in attributes {
                 let (digest_id, random) =
                     fresh_item_randomness(&mut used_digest_ids, &mut used_randoms)?;
-                let encoded = encode_item(digest_id, &random, &elem_id, &elem_value)?;
+                let mdl =
+                    self.doc_type == crate::mdl::DOC_TYPE && namespace == crate::mdl::NAMESPACE;
+                let encoded = encode_item(
+                    digest_id,
+                    &random,
+                    &elem_id,
+                    &elem_value,
+                    mdl.then_some(validity.valid_from),
+                )?;
+                #[cfg(feature = "certificate-profile")]
+                if mdl && matches!(elem_id.as_str(), "issuing_country" | "issuing_jurisdiction") {
+                    crate::certificate::check_mdl_issuer_attribute(
+                        &leaf,
+                        &elem_id,
+                        elem_value.as_text().expect("validated mDL text field"),
+                    )?;
+                }
                 let item = IssuerSignedItem {
                     digest_id,
                     random,
@@ -212,6 +241,18 @@ impl DocumentBuilder {
                 items.push(item);
             }
 
+            if self.doc_type == crate::mdl::DOC_TYPE && namespace == crate::mdl::NAMESPACE {
+                let value = |name| {
+                    items
+                        .iter()
+                        .find(|item| item.element_identifier == name)
+                        .and_then(|item| item.element_value.as_text())
+                };
+                crate::mdl::check_jurisdiction(
+                    value("issuing_country"),
+                    value("issuing_jurisdiction"),
+                )?;
+            }
             name_spaces.insert(namespace, items);
         }
 
@@ -429,6 +470,7 @@ fn encode_item(
     random: &[u8],
     identifier: &str,
     value: &ciborium::Value,
+    mdl_valid_from: Option<crate::Timestamp>,
 ) -> Result<Vec<u8>, MdocError> {
     let value_len = data_item::encoded_len(value)?;
     let inner_len = 1
@@ -452,7 +494,20 @@ fn encode_item(
     push_text(&mut out, "elementIdentifier");
     push_text(&mut out, identifier);
     debug_assert_eq!(out.len(), 2 + head_len(inner_len as u64) + inner_len);
-    crate::cbor::raw::validate(&out)?;
+    let item = crate::cbor::raw::Item::parse(&out)?;
+    if let Some(valid_from) = mdl_valid_from {
+        for entry in item.embedded()?.map()? {
+            let (name, value) = entry?;
+            if name.as_text() == Some("elementValue") {
+                crate::mdl::validate_element(
+                    identifier,
+                    crate::CborValueRef::from_item(value),
+                    valid_from,
+                )?;
+                break;
+            }
+        }
+    }
     Ok(out)
 }
 
@@ -496,7 +551,7 @@ mod tests {
             for id in [65_536, 23, 255] {
                 let random = vec![id as u8; 32];
                 let value = Value::Bytes(vec![id as u8; 256]);
-                let encoded = encode_item(id, &random, "portrait", &value).unwrap();
+                let encoded = encode_item(id, &random, "portrait", &value, None).unwrap();
                 items.push(IssuerSignedItem {
                     digest_id: id,
                     random,
@@ -599,7 +654,7 @@ mod tests {
             Value::Bytes(vec![0x5a; 65_536]),
         ]);
         let random = [0x42; 32];
-        let actual = encode_item(0x7fff_ffff, &random, "portrait", &value).unwrap();
+        let actual = encode_item(0x7fff_ffff, &random, "portrait", &value, None).unwrap();
         // The reference uses a separately assembled, schema-ordered Value map.
         let reference = Value::Map(vec![
             ("random".into(), Value::Bytes(random.to_vec())),

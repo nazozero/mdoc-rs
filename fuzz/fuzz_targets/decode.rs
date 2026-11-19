@@ -7,6 +7,17 @@ fuzz_target!(|input: &[u8]| {
         let _ = nazo_mdoc::cbor::date::FullDate::new(text);
     }
     let _ = nazo_mdoc::cbor::raw::validate(input);
+    if let Ok(value) = nazo_mdoc::CborValueRef::parse(input) {
+        let valid_from = "2026-11-17T12:00:00Z".parse().unwrap();
+        for name in [
+            "birth_date",
+            "issue_date",
+            "driving_privileges",
+            "biometric_template_face",
+        ] {
+            let _ = nazo_mdoc::mdl::validate_element(name, value, valid_from);
+        }
+    }
     if let Ok(value) = nazo_mdoc::cbor::decode_cbor(input) {
         let _ = nazo_mdoc::cbor::data_item::encode_cbor_canonical(&value);
     }

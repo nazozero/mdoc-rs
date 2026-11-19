@@ -1,12 +1,11 @@
 # Core performance measurements
 
-The baseline is `070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc`. The candidate is the
+The baseline is `920b717f9916a7dda1ecacd6bacf3bde84d75495`. The candidate is the
 current checkout. Each executable links one revision with the `issue` feature.
 Separate executables preserve each revision's dependency features. The lockfile
 records the resolved dependency graph, including separate versions where the
 historical library and current checkout require different dependency types.
-The historical source revision stays fixed when the candidate's dependencies
-are upgraded.
+Historical reports retain their own pinned baselines and archived source manifests.
 
 ## Build and preflight
 
@@ -78,7 +77,7 @@ compare the same logical claims and validation rules with fresh wire bytes.
 
 ### Compare owned and borrowed APIs in the same executable
 
-The candidate includes three additional cases that return models borrowing the
+Both builds include three cases that return models borrowing the
 input. Use the candidate executable for both runner labels and select the
 operations with `--baseline-case` and `--candidate-case`. This compares the two
 API contracts under the same library revision, dependency versions, compiler
@@ -120,17 +119,19 @@ is included for both API contracts. Borrowed models still allocate collection
 metadata; allocation measurements do not imply that an operation copies no
 bytes or allocates nothing.
 
-### Certificate conversion across dependency versions
+### Optional certificate profile comparison
 
-`certificate_key_convert` is available only in the candidate build. The
-historical revision exposes older SPKI/DER dependency types, which cannot be
-passed interchangeably with the upgraded certificate types used by this
-harness. Baseline preflight instead passes the Annex D certificate's original
-P-256 point through the stable SEC1 conversion API. The baseline remains fixed
-at `070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc`; it is not patched to accept the
-new SPKI type. Do not calculate a cross-revision delta for this candidate-only
-case. Historical archived runs that contain a baseline conversion measurement
-used their recorded dependency graph and harness.
+The current baseline is the main revision before the 0.4 protocol-boundary
+change. Both revisions expose borrowed verification and the same SPKI types.
+Build the candidate with `--features certificate-profile` to measure automatic
+Annex B validation, or `--features candidate` for the empty-default core.
+Copy each executable before building the next feature set in a shared target
+directory. Metadata distinguishes `candidate-profile` from `candidate`.
+
+The profile build performs additional required work, including strict DER plus
+borrowed certificate views. Compare it separately from the default build; a
+baseline without profiles is not an equivalent security workload. The workload
+returns pending-trust evidence and does not measure a host X.509 path engine.
 
 ### Recorded outputs
 
@@ -163,15 +164,15 @@ measurement round.
 | --- | --- |
 | `measurement_control` | Clock and harness floor |
 | `response_parse` | Annex D DeviceResponse parsing into owned models |
-| `response_parse_borrowed` | Annex D parsing with borrowed values; candidate only |
+| `response_parse_borrowed` | Annex D parsing with borrowed values |
 | `mso_parse` | Tag 24 MSO decoding and owned model construction |
-| `mso_parse_borrowed` | Tag 24 MSO validation and borrowed model construction; candidate only |
+| `mso_parse_borrowed` | Tag 24 MSO validation and borrowed model construction |
 | `mso_decode` | Bounded inner MSO decoding with preserved tags |
 | `canonical_mso_encode` | Deterministic MSO encoding |
 | `disclosure_verify` | Issuer item digests and disclosure checks |
 | `coset_sig_structure_control` | Unchanged coset Sig_structure constructor |
 | `certificate_decode` | Leaf DER decoding |
-| `certificate_key_convert` | SPKI to COSE key conversion; candidate only |
+| `certificate_key_convert` | SPKI to COSE key conversion |
 | `issuer_es256_verify` | Issuer key checks and signature verification |
 | `holder_es256_verify` | Holder authentication |
 | `issuance_prepare` | Two-attribute issuance preparation |
@@ -180,5 +181,5 @@ measurement round.
 | `issuance_complete` | Complete two-attribute issuance |
 | `issuer_signed_encode` | IssuerSigned wire encoding |
 | `full_protocol_verify` | Final presentation authentication returning owned evidence |
-| `full_protocol_verify_borrowed` | Final presentation authentication returning borrowed evidence; candidate only |
+| `full_protocol_verify_borrowed` | Final presentation authentication returning borrowed evidence |
 | `redirect_transcript_validate` | Borrowed transcript/request binding |
