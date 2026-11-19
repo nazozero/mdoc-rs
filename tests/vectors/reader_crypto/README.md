@@ -1,10 +1,10 @@
-# Native reader cryptography vectors
+# Reader cryptography vectors
 
-`reader-crypto` uses the maintained [rust-openssl](https://github.com/rust-openssl/rust-openssl)
-0.10.82 bindings (Apache-2.0) for Brainpool P256r1/P320r1/P384r1/P512r1 and
-Ed448. The tested native library is OpenSSL 3.5.7. Existing NIST/Ed25519
-verification continues to use RustCrypto. The Cargo dependency is limited to
-native targets; WebAssembly builds reject the additional curves.
+`reader-crypto` uses pure Rust `bp256`, `bp384` and `ed448-goldilocks`
+for Brainpool P256r1/P384r1 and Ed448 on native and WASM targets. Brainpool
+P320r1/P512r1 remain in the reference corpus but are rejected by the core
+pending a reviewed implementation. OpenSSL is used only by independent
+fixture generation and the Linux session-test CLI oracle.
 
 ## Independent known answers
 
@@ -48,26 +48,14 @@ require application issuer trust and request policy.
 
 ## Point validation and concurrency
 
-Brainpool SEC1 decoding delegates curve-membership checks to OpenSSL. The four
-named groups have cofactor one in [RFC 5639 §§3.4–3.7](https://www.rfc-editor.org/rfc/rfc5639.html#section-3.4).
-The boundary rejects infinity; repeating a subgroup multiplication adds no
-validation for these prime-order groups. See OpenSSL's
-[`ossl_ec_GFp_simple_oct2point`](https://github.com/openssl/openssl/blob/openssl-3.5.7/crypto/ec/ecp_oct.c)
-for compressed/uncompressed coordinate checks.
+Brainpool P256/P384 public points are parsed by RustCrypto curve arithmetic
+with SEC1 full/compressed point validation. Ed448 public keys are decoded with
+prime-order subgroup checks and identity rejection; malformed and noncanonical
+points are rejected before standalone issuance or verification.
 
-OpenSSL's default provider performs Ed448 point decoding during signature
-verification. Its raw-key import and public-key check alone do not establish
-mathematical point validity; see
-[`ecx_validate`](https://github.com/openssl/openssl/blob/openssl-3.5.7/providers/implementations/keymgmt/ecx_kmgmt.c).
-The tests reject identity and small-order-key trivial-signature forgeries and
-noncanonical encodings. Standalone Ed448 device-key validation remains
-unsupported in `DocumentBuilder` and `verify_issued`; a valid complete holder
-signature is required for the supported Ed448 presentation path.
-
-Native verification keys are `Send + Sync`. A regression shares each of the
-five new curve keys across eight threads, with sixteen verifications per
-thread. Each verification owns its operation state; the key remains immutable.
-This is a race/state-isolation regression, not a throughput benchmark.
+The test shares prepared public keys across eight threads with sixteen
+verifications per thread. This checks immutable verifier state and independent
+session counters; it is not a throughput benchmark.
 
 ## Commands and frozen corpus
 

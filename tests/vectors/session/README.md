@@ -28,9 +28,10 @@ compressed COSE points; reader keys use uncompressed points.
 
 `session_reader.rs` uses RustCrypto P-256 for the external private-key operation
 and checks the independent encrypted messages. `session_agreement_curves.rs`
-uses an OpenSSL-backed external key provider and verifies both the exact first
-encrypted request and the issuer-authenticated DeviceMAC response for all nine
-curves. The issuer certificate/signature in this table uses P-256; signature
+uses the OpenSSL CLI solely as an external test oracle, without linking the
+OpenSSL Rust crate. It verifies exact encrypted requests and authenticated
+DeviceMAC responses for seven supported curves and checks rejection of Brainpool
+P320/P512. The reference corpus retains all nine session cases. Signature
 algorithm coverage is recorded separately in `reader_crypto`.
 
 These are reproducible protocol/crypto integration vectors. Device hardware,
