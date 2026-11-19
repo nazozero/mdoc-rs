@@ -117,9 +117,7 @@ fn root_exclusion_uses_the_authenticated_anchor_not_a_name_guess() {
 #[cfg(feature = "issue")]
 fn issuance_and_verification_enforce_profiles_without_an_application_check() {
     use nazo_mdoc::{
-        builder::DocumentBuilder,
-        certificate::PreparedDocumentSigner,
-        model::CoseAlgorithm,
+        builder::DocumentBuilder, certificate::PreparedDocumentSigner, model::CoseAlgorithm,
     };
     use signature::Signer;
 
@@ -148,7 +146,11 @@ fn issuance_and_verification_enforce_profiles_without_an_application_check() {
     .unwrap();
     let signer = PreparedDocumentSigner::new(&good.der, CoseAlgorithm::ES256).unwrap();
     assert!(PreparedDocumentSigner::new(&bad.der, CoseAlgorithm::ES256).is_err());
-    assert!(builder().prepare_with_signer(vec![bad.der.clone()], &signer).is_err());
+    assert!(
+        builder()
+            .prepare_with_signer(vec![bad.der.clone()], &signer)
+            .is_err()
+    );
     assert!(builder().prepare_with_signer(Vec::new(), &signer).is_err());
     let prepared = builder()
         .prepare_with_signer(vec![good.der.clone()], &signer)

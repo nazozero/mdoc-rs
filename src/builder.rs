@@ -7,9 +7,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::cbor::data_item;
 use crate::cbor::raw::{head_len, push_bytes, push_head, push_text};
-use crate::error::MdocError;
 #[cfg(feature = "certificate-profile")]
 use crate::certificate::PreparedDocumentSigner;
+use crate::error::MdocError;
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
 use crate::model::issuer_auth::IssuerAuth;
 use crate::model::issuer_signed_item::IssuerSignedItem;
@@ -223,7 +223,9 @@ impl DocumentBuilder {
             }
             None
         } else {
-            Some(crate::certificate::parse_document_signer(&certificate_chain[0])?)
+            Some(crate::certificate::parse_document_signer(
+                &certificate_chain[0],
+            )?)
         };
         #[cfg(feature = "certificate-profile")]
         let issuer_key = if let Some(signer) = signer {

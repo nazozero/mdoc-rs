@@ -484,9 +484,9 @@ fn check_mdl_issuer_value(
     value: &str,
 ) -> Result<(), CertificateProfileError> {
     match name {
-        "issuing_country" if country != value => Err(CertificateProfileError(
-            "mDL issuer attribute binding",
-        )),
+        "issuing_country" if country != value => {
+            Err(CertificateProfileError("mDL issuer attribute binding"))
+        }
         "issuing_jurisdiction" if value.as_bytes().get(..2) != Some(country.as_bytes()) => {
             Err(CertificateProfileError("mDL jurisdiction country binding"))
         }
@@ -496,7 +496,6 @@ fn check_mdl_issuer_value(
         _ => Ok(()),
     }
 }
-
 
 /// Static, protocol-checked DS evidence reusable for the exact same certificate.
 ///
@@ -520,10 +519,8 @@ impl PreparedDocumentSigner {
         algorithm: crate::model::types::CoseAlgorithm,
     ) -> Result<Self, crate::MdocError> {
         let certificate = parse_document_signer(der)?;
-        let key = crate::cose::VerificationKey::from_spki_ref(
-            spki(&certificate)?,
-            algorithm.cose_id(),
-        )?;
+        let key =
+            crate::cose::VerificationKey::from_spki_ref(spki(&certificate)?, algorithm.cose_id())?;
         Ok(Self {
             certificate_der: der.to_vec(),
             algorithm: algorithm.cose_id(),

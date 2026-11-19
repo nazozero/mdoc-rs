@@ -142,7 +142,9 @@ fn verify_presentation_borrowed_inner<'a>(
     encoded: &'a [u8],
     transcript: &SessionTranscript<'_>,
     options: &VerificationOptions,
-    #[cfg(feature = "certificate-profile")] signer: Option<&crate::certificate::PreparedDocumentSigner>,
+    #[cfg(feature = "certificate-profile")] signer: Option<
+        &crate::certificate::PreparedDocumentSigner,
+    >,
 ) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
     let response = crate::parser::parse_borrowed_with_limits(
         encoded,
@@ -364,7 +366,9 @@ pub(crate) fn certificate_interval(
 
 fn authenticate_issuer<'a>(
     auth: &IssuerAuthRef<'a>,
-    #[cfg(feature = "certificate-profile")] signer: Option<&crate::certificate::PreparedDocumentSigner>,
+    #[cfg(feature = "certificate-profile")] signer: Option<
+        &crate::certificate::PreparedDocumentSigner,
+    >,
 ) -> Result<IssuerEvidence<'a>, MdocError> {
     let sign1 = &auth.cose_sign1;
     let algorithm =
@@ -398,10 +402,7 @@ fn authenticate_issuer<'a>(
     let key = if let Some(signer) = reused {
         signer.key.clone()
     } else {
-        crate::cose::VerificationKey::from_spki_ref(
-            crate::certificate::spki(&leaf)?,
-            algorithm,
-        )?
+        crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?
     };
     let framing = crate::cose::AuthenticationStructure::sign1(sign1.protected.len(), payload.len());
     if !key.verify(&framing.parts(sign1.protected, payload), sign1.signature)? {
