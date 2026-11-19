@@ -488,8 +488,10 @@ fn authenticate_issuer<'a>(
     let key = if let Some(signer) = reused {
         &signer.key
     } else {
-        parsed_key =
-            crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?;
+        parsed_key = crate::cose::VerificationKey::from_spki_ref(
+            crate::certificate::spki(&leaf)?,
+            algorithm,
+        )?;
         &parsed_key
     };
     let framing = crate::cose::AuthenticationStructure::sign1(sign1.protected.len(), payload.len());
