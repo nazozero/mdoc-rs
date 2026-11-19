@@ -51,7 +51,7 @@ x509-parser = { version = "0.18.1", default-features = false, optional = true }
 zeroize = { version = "1.9.2", default-features = false, features = ["alloc"], optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-aws-lc-rs = { version = "1.19.0", default-features = false, optional = true }
+aws-lc-rs = { version = "1.19.0", default-features = false, features = ["non-fips"], optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
