@@ -62,6 +62,7 @@ jobs:
           name = "mdoc-curve-ab"
           version = "0.0.0"
           edition = "2024"
+          [workspace]
           [dependencies]
           nazo-mdoc = { git = "https://github.com/nazozero/nazo-mdoc", rev = "@@REV@@", default-features = false, features = ["reader-crypto"] }
           coset = "0.4.2"
@@ -126,6 +127,7 @@ jobs:
           path: evidence/curve-samples.csv
           retention-days: 30
   common-core-ab:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
