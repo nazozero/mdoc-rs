@@ -39,7 +39,7 @@ pub(crate) fn verify_cose_signature_borrowed(
 
 /// A parsed public key retained by a prepared operation. All constructors check
 /// the algorithm binding before passing key material to the official verifier.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum VerificationKey {
     P256(p256::ecdsa::VerifyingKey),
     P384(p384::ecdsa::VerifyingKey),
