@@ -3,7 +3,7 @@
 A Rust library for issuing, parsing and authenticating ISO mdoc credentials.
 It provides CBOR/COSE processing, selective disclosure, external signing and
 OpenID4VP 1.0 Final session binding. Optional reader features add ISO device
-retrieval sessions and the additional native cipher-suite-1 signature curves.
+retrieval sessions and portable cipher-suite-1 signature curves.
 
 The package is `nazo-mdoc`; the Rust crate is `nazo_mdoc`. Rust 1.100 or later
 is required. For a Git dependency, pin the full commit revision you have tested.
@@ -73,9 +73,9 @@ bytes remain borrowed until they are written into that response.
 ECDSA and HMAC verification consume message fragments directly. Strict Ed25519
 verification uses a contiguous message, and X.509 decoding uses the upstream
 certificate model. Namespace and digest indexes store references in collections.
-New wire output and external signing inputs have their own buffers. Native
-Brainpool verification also hashes borrowed fragments; pure Ed448 uses
-OpenSSL's one-shot message interface.
+New wire output and external signing inputs have their own buffers. Brainpool
+verification hashes borrowed fragments; Ed448 assembles a contiguous message
+only when multiple fragments are supplied.
 
 ## Issuance
 
@@ -199,7 +199,8 @@ application into MAC authentication.
 | Area | Support |
 | --- | --- |
 | Issuer and holder signatures | ES256/P-256, ES384/P-384, ES512/P-521 and EdDSA/Ed25519; fixed-width COSE ECDSA signatures and strict Ed25519 verification |
-| Native reader signatures (`reader-crypto`) | ES256/brainpoolP256r1, ES384/brainpoolP320r1 and brainpoolP384r1, ES512/brainpoolP512r1, EdDSA/Ed448 through OpenSSL |
+| Portable reader signatures (`reader-crypto`) | Brainpool P256/P384 and Ed448 via pure Rust, including WASM |
+| Reader algorithm gaps | Brainpool P320/P512 are rejected until a suitable reviewed implementation is available |
 | MSO digests | SHA-256, SHA-384 and SHA-512 with matching digest lengths |
 | Versions | Emit `1.0`; receive numeric minor versions of major version 1 |
 | Session binding | OpenID4VP 1.0 Final Redirect and DC API handovers; original QR/NFC device-retrieval handovers with `reader-session` |
@@ -221,8 +222,8 @@ The [protocol matrix](docs/protocol-matrix.md) maps requirements to code and
 tests. The [edition-specific reader inventory](docs/iso-reader-conformance.md)
 records each role, native/WASM limits and remaining adapter, interoperability
 and official-test evidence for [issue #3](https://github.com/nazozero/nazo-mdoc/issues/3).
-Standalone Ed448 device-key validation remains unsupported where no holder
-signature is checked; Ed448 presentation verification uses the signature path.
+Ed448 public-point decoding checks subgroup membership and rejects identity,
+so standalone device-key validation and complete signature verification are supported.
 
 ## Features
 
@@ -234,7 +235,8 @@ signature is checked; Ed448 presentation verification uses the signature path.
 | `wasm-js` | JavaScript entropy integration for issuance on `wasm32-unknown-unknown` |
 | `certificate-profile` | Automatic ISO DS profile enforcement, borrowed leaf access and IACA/rollover evidence helpers; optional `x509-parser` and `sha1` |
 | `reader-session` | ISO device-retrieval reader state, external ECDH, AES-GCM and secret-buffer cleanup; no transport or private-key implementation |
-| `reader-crypto` | Native Brainpool/Ed448 signature verification and Brainpool agreement-point validation using system OpenSSL; unavailable curves reject on WASM |
+| `reader-crypto` | Portable Brainpool P256/P384 and Ed448 signature and point validation on native/WASM |
+| `aws-lc` | Use AWS-LC 1.19 native AES-GCM for reader sessions; WASM retains RustCrypto |
 
 Verification accepts an explicit time and runs without a network client or
 platform clock. See [architecture](docs/architecture.md) for the data flow and
@@ -247,6 +249,7 @@ cargo fmt --check
 cargo test --locked --no-default-features
 cargo test --locked --no-default-features --features issue
 cargo test --locked --no-default-features --features reader-session
+cargo test --locked --no-default-features --features reader-session,reader-crypto
 cargo test --locked --all-features
 cargo clippy --locked --all-features --all-targets -- -D warnings
 cargo audit --deny warnings

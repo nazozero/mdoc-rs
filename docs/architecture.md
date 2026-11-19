@@ -75,11 +75,11 @@ parsing. Error-bearing replies expose untrusted protocol data without partial
 credential admission. Successful replies reuse the issuer/disclosure/authorization
 verifier for either DeviceSignature or session-bound DeviceMAC.
 
-`reader-crypto` adds native OpenSSL verification for the extra Brainpool and
-Ed448 signature combinations. Curve identity is separate from COSE algorithm:
-ES384, for example, also covers the 320-bit Brainpool curve. Default RustCrypto
-verification remains available without native dependencies. Ed448 standalone
-device-key validation remains unsupported without a signature-checked context.
+`reader-crypto` adds portable Brainpool P256/P384 and Ed448 verification.
+Curve identity remains distinct from COSE algorithm. Brainpool P320/P512
+remain unsupported pending a suitable reviewed implementation.
+Reader AES-GCM uses RustCrypto by default; `aws-lc` selects AWS-LC on native
+targets without changing the ECDH adapter or session security state.
 
 ## Ownership
 
@@ -97,11 +97,9 @@ device-key validation remains unsupported without a signature-checked context.
 - `into_owned` copies into independent storage. The old owned APIs use this
   conversion after the shared borrowed path. Their certificate-chain return
   contract retains a separate owned chain alongside the owned COSE headers.
-- ECDSA verification hashes message fragments through RustCrypto's multipart
-  interface; the native Brainpool backend also hashes fragments directly. HMAC
-  updates from the same borrowed framing. Ed25519 retains strict verification.
-  Ed25519 and native pure Ed448 assemble a contiguous message when needed by
-  their backend.
+- ECDSA verification, including Brainpool, hashes borrowed fragments through
+  RustCrypto's multipart interface. HMAC uses the same borrowed framing.
+  Strict Ed25519 and Ed448 assemble contiguous messages only when required.
 - The upstream X.509 decoder owns its decoded certificate fields. Issuer public
   points go directly from SPKI to the cryptographic verification key. Prepared
   signing operations retain that key rather than rebuilding a COSE key.
