@@ -22,7 +22,8 @@ impl ExtendedVerificationKey {
                 .map(Self::Brainpool384)
                 .map_err(|_| MdocError::Signature("invalid Brainpool P384 public point".into())),
             SignatureCurve::Ed448 => ed448_goldilocks::VerifyingKey::from_bytes(
-                bytes.try_into()
+                bytes
+                    .try_into()
                     .map_err(|_| MdocError::Signature("Ed448 key length".into()))?,
             )
             .map(Self::Ed448)
@@ -36,18 +37,24 @@ impl ExtendedVerificationKey {
     pub(crate) fn verify(&self, parts: &[&[u8]], signature: &[u8]) -> Result<bool, MdocError> {
         match self {
             Self::Brainpool256(key) => {
-                let signature = bp256::r1::ecdsa::Signature::from_slice(signature)
-                    .map_err(|_| MdocError::Signature("Brainpool P256 signature length or scalar".into()))?;
+                let signature =
+                    bp256::r1::ecdsa::Signature::from_slice(signature).map_err(|_| {
+                        MdocError::Signature("Brainpool P256 signature length or scalar".into())
+                    })?;
                 Ok(key.multipart_verify(parts, &signature).is_ok())
             }
             Self::Brainpool384(key) => {
-                let signature = bp384::r1::ecdsa::Signature::from_slice(signature)
-                    .map_err(|_| MdocError::Signature("Brainpool P384 signature length or scalar".into()))?;
+                let signature =
+                    bp384::r1::ecdsa::Signature::from_slice(signature).map_err(|_| {
+                        MdocError::Signature("Brainpool P384 signature length or scalar".into())
+                    })?;
                 Ok(key.multipart_verify(parts, &signature).is_ok())
             }
             Self::Ed448(key) => {
-                let signature = ed448_goldilocks::Signature::from_slice(signature)
-                    .map_err(|_| MdocError::Signature("Ed448 signature must be 114 bytes".into()))?;
+                let signature =
+                    ed448_goldilocks::Signature::from_slice(signature).map_err(|_| {
+                        MdocError::Signature("Ed448 signature must be 114 bytes".into())
+                    })?;
                 let message;
                 let bytes = if let [part] = parts {
                     *part

@@ -28,7 +28,12 @@ fn peer_spki(peer: &AgreementPublicKey) -> Vec<u8> {
         ObjectIdentifier as Oid,
         db::rfc5912::{ID_EC_PUBLIC_KEY, SECP_256_R_1, SECP_384_R_1, SECP_521_R_1},
     };
-    let ec = |oid: Oid| (ID_EC_PUBLIC_KEY, Some(der::asn1::Any::encode_from(&oid).unwrap()));
+    let ec = |oid: Oid| {
+        (
+            ID_EC_PUBLIC_KEY,
+            Some(der::asn1::Any::encode_from(&oid).unwrap()),
+        )
+    };
     let (oid, parameters) = match peer.curve() {
         1 => ec(SECP_256_R_1),
         2 => ec(SECP_384_R_1),

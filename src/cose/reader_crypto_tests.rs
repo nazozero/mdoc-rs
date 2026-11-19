@@ -158,7 +158,11 @@ fn standalone_key_validation_accepts_strict_ed448_points() {
         let encoded = key.to_vec().unwrap();
         let borrowed = CoseKeyRef::parse(crate::cbor::raw::Item::parse(&encoded).unwrap()).unwrap();
         let checked = crate::cose::validate_borrowed_device_public_key(&borrowed);
-        assert!(checked.is_ok(), "curve {} standalone point validation", v.curve);
+        assert!(
+            checked.is_ok(),
+            "curve {} standalone point validation",
+            v.curve
+        );
     }
 }
 
@@ -197,7 +201,6 @@ fn compressed_brainpool_keys_verify_and_reject_changed_parity_and_invalid_x() {
             .unwrap()
             .fill(0xff);
         assert!(verify_cose_signature(&v.message, &v.signature, &key, v.alg).is_err());
-
     }
 }
 

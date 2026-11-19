@@ -12,7 +12,7 @@ use std::{borrow::Cow, ops::Range};
 #[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
 use aes_gcm::{Aes256Gcm, KeyInit, aead::AeadInOut};
 #[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
-use aws_lc_rs::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -154,13 +154,17 @@ impl AgreementPublicKey {
                 .map(|_| ())
                 .map_err(|_| error("invalid P-521 agreement point"))?,
             #[cfg(feature = "reader-crypto")]
-            256 => bp256::elliptic_curve::PublicKey::<bp256::BrainpoolP256r1>::from_sec1_bytes(point)
-                .map(|_| ())
-                .map_err(|_| error("invalid Brainpool P256 agreement point"))?,
+            256 => {
+                bp256::elliptic_curve::PublicKey::<bp256::BrainpoolP256r1>::from_sec1_bytes(point)
+                    .map(|_| ())
+                    .map_err(|_| error("invalid Brainpool P256 agreement point"))?
+            }
             #[cfg(feature = "reader-crypto")]
-            258 => bp384::elliptic_curve::PublicKey::<bp384::BrainpoolP384r1>::from_sec1_bytes(point)
-                .map(|_| ())
-                .map_err(|_| error("invalid Brainpool P384 agreement point"))?,
+            258 => {
+                bp384::elliptic_curve::PublicKey::<bp384::BrainpoolP384r1>::from_sec1_bytes(point)
+                    .map(|_| ())
+                    .map_err(|_| error("invalid Brainpool P384 agreement point"))?
+            }
             _ => return Err(error("agreement curve is not supported by the backend")),
         }
         Ok(key)
@@ -256,7 +260,6 @@ enum Phase {
     Closed,
 }
 
-
 #[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
 type SessionCipher = LessSafeKey;
 #[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
@@ -275,7 +278,11 @@ fn new_cipher(key: &[u8]) -> Result<SessionCipher, MdocError> {
 }
 
 #[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
-fn seal(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8]) -> Result<[u8; 16], MdocError> {
+fn seal(
+    cipher: &SessionCipher,
+    nonce: [u8; 12],
+    plaintext: &mut [u8],
+) -> Result<[u8; 16], MdocError> {
     let tag = cipher
         .seal_in_place_separate_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), plaintext)
         .map_err(|_| error("session request encryption failed"))?;
@@ -285,7 +292,11 @@ fn seal(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8]) -> Result
 }
 
 #[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
-fn seal(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8]) -> Result<[u8; 16], MdocError> {
+fn seal(
+    cipher: &SessionCipher,
+    nonce: [u8; 12],
+    plaintext: &mut [u8],
+) -> Result<[u8; 16], MdocError> {
     let tag = cipher
         .encrypt_inout_detached(&nonce.into(), &[], plaintext.into())
         .map_err(|_| error("session request encryption failed"))?;
@@ -295,17 +306,37 @@ fn seal(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8]) -> Result
 }
 
 #[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
-fn open(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8], tag: &[u8]) -> Result<(), MdocError> {
+fn open(
+    cipher: &SessionCipher,
+    nonce: [u8; 12],
+    plaintext: &mut [u8],
+    tag: &[u8],
+) -> Result<(), MdocError> {
     cipher
-        .open_in_place_separate_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), tag, plaintext)
+        .open_in_place_separate_tag(
+            Nonce::assume_unique_for_key(nonce),
+            Aad::empty(),
+            tag,
+            plaintext,
+        )
         .map(|_| ())
         .map_err(|_| error("session response authentication failed"))
 }
 
 #[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
-fn open(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8], tag: &[u8]) -> Result<(), MdocError> {
+fn open(
+    cipher: &SessionCipher,
+    nonce: [u8; 12],
+    plaintext: &mut [u8],
+    tag: &[u8],
+) -> Result<(), MdocError> {
     cipher
-        .decrypt_inout_detached(&nonce.into(), &[], plaintext.into(), &aes_gcm::Tag::try_from(tag).expect("16-byte tag"))
+        .decrypt_inout_detached(
+            &nonce.into(),
+            &[],
+            plaintext.into(),
+            &aes_gcm::Tag::try_from(tag).expect("16-byte tag"),
+        )
         .map_err(|_| error("session response authentication failed"))
 }
 

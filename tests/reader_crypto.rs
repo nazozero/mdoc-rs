@@ -40,7 +40,11 @@ fn independent_extended_curve_presentations_follow_the_compiled_capability() {
             let issuer_only = verify_issued_borrowed(&issued, "org.example.reader", options().now);
             assert!(issuer_only.is_ok(), "{} issuer-only", fields[0]);
         } else {
-            assert!(result.is_err(), "{} requires the portable reader-crypto feature", fields[0]);
+            assert!(
+                result.is_err(),
+                "{} requires the portable reader-crypto feature",
+                fields[0]
+            );
             assert!(verify_issued_borrowed(&issued, "org.example.reader", options().now).is_err());
         }
     }
