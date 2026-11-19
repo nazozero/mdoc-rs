@@ -19,7 +19,7 @@ debug = []
 wasm-js = ["getrandom?/wasm_js"]
 certificate-profile = ["dep:sha1", "dep:x509-parser"]
 reader-session = ["dep:aes-gcm", "dep:zeroize", "hmac/zeroize", "sha2/zeroize"]
-reader-crypto = ["dep:bp256", "dep:bp384", "dep:ecdsa", "dep:ed448-goldilocks"]
+reader-crypto = ["dep:bp256", "dep:bp384", "dep:ecdsa", "dep:crrl"]
 aws-lc = ["dep:aws-lc-rs"]
 
 [dependencies]
@@ -27,7 +27,7 @@ aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "ze
 bp256 = { version = "0.14.0", default-features = false, features = ["arithmetic", "ecdsa", "sha256"], optional = true }
 bp384 = { version = "0.14.0", default-features = false, features = ["arithmetic", "ecdsa", "sha384"], optional = true }
 ecdsa = { version = "0.17.0", default-features = false, features = ["algorithm"], optional = true }
-ed448-goldilocks = { version = "=0.14.0-pre.15", default-features = false, features = ["signing"], optional = true }
+crrl = { version = "0.9.0", default-features = false, features = ["ed448"], optional = true }
 ciborium = "0.2.2"
 coset = "0.4.2"
 const-oid = { version = "0.10.3", features = ["db"] }

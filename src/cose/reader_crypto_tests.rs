@@ -276,7 +276,30 @@ fn ed448_rejects_noncanonical_aliases_before_signature_verification() {
         .build();
     assert!(VerificationKey::from_cose(&alias, algorithms::EDDSA).is_err());
 
-    let mut altered_signature = signature;
+    let mut altered_signature = signature.clone();
     altered_signature[56] |= 1;
     assert!(!verify_cose_signature(&message, &altered_signature, &key, algorithms::EDDSA).unwrap());
+
+    let mut y = vec![0xff; 57];
+    y[28] = 0xfe;
+    y[56] = 0;
+    for bad_y in [y.clone(), {
+        y[28] = 0xff;
+        y
+    }] {
+        let invalid_key = coset::CoseKeyBuilder::new_okp_key()
+            .param(-1, 7.into())
+            .param(-2, ciborium::Value::Bytes(bad_y.clone()))
+            .build();
+        assert!(VerificationKey::from_cose(&invalid_key, algorithms::EDDSA).is_err());
+
+        let mut invalid_signature = signature.clone();
+        invalid_signature[..57].copy_from_slice(&bad_y);
+        assert!(!verify_cose_signature(
+            &message,
+            &invalid_signature,
+            &key,
+            algorithms::EDDSA
+        ).unwrap());
+    }
 }

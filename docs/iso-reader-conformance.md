@@ -161,9 +161,9 @@ and the RFC 8152 compressed `y` boolean; EReader EC2 remains uncompressed.
 ### Added backend and operation boundaries
 
 The optional `reader-crypto` feature uses RustCrypto `bp256`/`bp384` and
-`ed448-goldilocks`. These algorithms work on native and WASM targets without
-OpenSSL. Ed448 public-point decoding rejects invalid, identity, and torsion
-points before standalone issuance or issuer-only verification.
+`crrl` (MIT) for Ed448. These algorithms work on native and WASM targets
+without OpenSSL. Ed448 public-point decoding is canonical and the protocol
+boundary checks the prime-order subgroup and excludes the identity.
 
 `aws-lc` selects `aws-lc-rs` 1.19 for reader-session AES-256-GCM on supported
 native targets. The default and WASM session implementation uses RustCrypto
