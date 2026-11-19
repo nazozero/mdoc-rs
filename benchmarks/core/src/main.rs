@@ -22,9 +22,11 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const BASELINE: &str = "070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc";
+const BASELINE: &str = "920b717f9916a7dda1ecacd6bacf3bde84d75495";
 const VARIANT: &str = if cfg!(feature = "baseline") {
     "baseline"
+} else if cfg!(feature = "certificate-profile") {
+    "candidate-profile"
 } else {
     "candidate"
 };
@@ -134,21 +136,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mso_value = nazo_mdoc::cbor::data_item::decode_cbor(inner)?;
     let canonical = nazo_mdoc::cbor::data_item::encode_cbor_canonical(&mso_value)?;
     let certificate = x509_cert::Certificate::from_der(auth.certificate_der()?)?;
-    #[cfg(feature = "candidate")]
     let issuer_public_key = nazo_mdoc::cose::key::cose_key_from_spki(
         certificate.tbs_certificate().subject_public_key_info(),
-    )?;
-    // The Annex D fixture uses an uncompressed P-256 point. Historical
-    // baseline revisions expose an older SPKI type, so preflight passes its
-    // original point bytes through the stable SEC1 API instead.
-    #[cfg(feature = "baseline")]
-    let issuer_public_key = nazo_mdoc::cose::key::cose_key_from_sec1_bytes(
-        1,
-        certificate
-            .tbs_certificate()
-            .subject_public_key_info()
-            .subject_public_key
-            .raw_bytes(),
     )?;
     let issuer_tbs = auth.cose_sign1.tbs_data(&[]);
     let transcript = fixtures::transcript();
@@ -221,14 +210,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || (),
         |_| nazo_mdoc::parse(black_box(&annex)).unwrap(),
     )?;
-    #[cfg(feature = "candidate")]
     runner.run(
         "response_parse_borrowed",
         || (),
         |_| nazo_mdoc::parse_borrowed(black_box(&annex)).unwrap(),
     )?;
     runner.run("mso_parse", || (), |_| auth.mso().unwrap())?;
-    #[cfg(feature = "candidate")]
     runner.run(
         "mso_parse_borrowed",
         || (),
@@ -262,7 +249,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         || (),
         |_| x509_cert::Certificate::from_der(black_box(auth.certificate_der().unwrap())).unwrap(),
     )?;
-    #[cfg(feature = "candidate")]
     runner.run(
         "certificate_key_convert",
         || (),
@@ -353,7 +339,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             documents
         },
     )?;
-    #[cfg(feature = "candidate")]
     runner.run(
         "full_protocol_verify_borrowed",
         || (),

@@ -12,9 +12,10 @@ license = "BSD-2-Clause"
 default = []
 baseline = ["dep:baseline"]
 candidate = ["dep:candidate"]
+certificate-profile = ["candidate", "candidate/certificate-profile"]
 
 [dependencies]
-baseline = { package = "nazo-mdoc", git = "https://github.com/nazozero/mdoc-rs", rev = "070e9cf727a31a8ee23ffd372d7dc9e378cbfdfc", optional = true, default-features = false, features = ["issue"] }
+baseline = { package = "nazo-mdoc", git = "https://github.com/nazozero/nazo-mdoc", rev = "920b717f9916a7dda1ecacd6bacf3bde84d75495", optional = true, default-features = false, features = ["issue"] }
 candidate = { package = "nazo-mdoc", path = "../..", optional = true, default-features = false, features = ["issue"] }
 ciborium = "0.2.2"
 coset = "0.4.2"
