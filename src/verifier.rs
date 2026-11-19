@@ -483,10 +483,14 @@ fn authenticate_issuer<'a>(
         algorithm,
     )?;
     #[cfg(feature = "certificate-profile")]
+    let parsed_key;
+    #[cfg(feature = "certificate-profile")]
     let key = if let Some(signer) = reused {
-        signer.key.clone()
+        &signer.key
     } else {
-        crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?
+        parsed_key =
+            crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?;
+        &parsed_key
     };
     let framing = crate::cose::AuthenticationStructure::sign1(sign1.protected.len(), payload.len());
     if !key.verify(&framing.parts(sign1.protected, payload), sign1.signature)? {
