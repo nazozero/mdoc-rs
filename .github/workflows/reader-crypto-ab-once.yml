@@ -6,7 +6,6 @@ permissions:
   contents: read
 jobs:
   curve-ab:
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -76,7 +75,7 @@ jobs:
           codegen-units = 1
           TOML
           for kind in old new; do
-            if [ "$kind" = old ]; then rev=feae88b64f771d1af11617bf3814ce49822b6727; else rev=25055bc6e0ae701981bacfec0cc7742a9a338e25; fi
+            if [ "$kind" = old ]; then rev=feae88b64f771d1af11617bf3814ce49822b6727; else rev=5a0ebad14866e58cd9deb539ea63210f266719f0; fi
             sed "s/@@REV@@/$rev/g" /tmp/mdoc-perf/Cargo.toml > "/tmp/mdoc-perf/$kind/Cargo.toml"
             cp /tmp/mdoc-perf/main.rs "/tmp/mdoc-perf/$kind/src/main.rs"
             CARGO_BUILD_JOBS=2 cargo build --release --manifest-path "/tmp/mdoc-perf/$kind/Cargo.toml" --target-dir "/tmp/mdoc-perf/$kind/target"
