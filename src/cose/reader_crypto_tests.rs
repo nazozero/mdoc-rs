@@ -261,7 +261,5 @@ fn ed448_rejects_noncanonical_aliases_before_signature_verification() {
 
     let mut altered_signature = signature;
     altered_signature[56] |= 1;
-    assert!(!verify_cose_signature(
-        &message, &altered_signature, &key, algorithms::EDDSA
-    ).unwrap());
+    assert!(!verify_cose_signature(&message, &altered_signature, &key, algorithms::EDDSA).unwrap());
 }

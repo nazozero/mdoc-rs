@@ -23,10 +23,14 @@ impl ExtendedVerificationKey {
                 .map_err(|_| MdocError::Signature("invalid Brainpool P384 public point".into())),
             SignatureCurve::Ed448 => {
                 if !canonical_ed448_point(bytes) {
-                    return Err(MdocError::Signature("noncanonical Ed448 public point".into()));
+                    return Err(MdocError::Signature(
+                        "noncanonical Ed448 public point".into(),
+                    ));
                 }
                 ed448_goldilocks::VerifyingKey::from_bytes(
-                    bytes.try_into().expect("canonical Ed448 points have length 57"),
+                    bytes
+                        .try_into()
+                        .expect("canonical Ed448 points have length 57"),
                 )
                 .map(Self::Ed448)
                 .map_err(|_| MdocError::Signature("invalid Ed448 public point".into()))
@@ -54,10 +58,9 @@ impl ExtendedVerificationKey {
                 Ok(key.multipart_verify(parts, &signature).is_ok())
             }
             Self::Ed448(key) => {
-                let parsed =
-                    ed448_goldilocks::Signature::from_slice(signature).map_err(|_| {
-                        MdocError::Signature("Ed448 signature must be 114 bytes".into())
-                    })?;
+                let parsed = ed448_goldilocks::Signature::from_slice(signature).map_err(|_| {
+                    MdocError::Signature("Ed448 signature must be 114 bytes".into())
+                })?;
                 if !canonical_ed448_point(&signature[..57]) {
                     return Ok(false);
                 }
