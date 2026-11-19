@@ -649,7 +649,7 @@ pub(crate) fn verify_device_mac<K: ReaderKeyAgreement>(
     salt: &[u8; 32],
     payload: &DeviceAuthentication<'_>,
 ) -> Result<(), MdocError> {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     if mac.payload.is_some() {
         return Err(error("deviceMac must use a detached payload"));
     }
