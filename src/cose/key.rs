@@ -150,8 +150,7 @@ pub fn cose_alg_to_name(alg: i64) -> &'static str {
 /// (`0x04 || x || y`).
 ///
 /// `curve_id` is a COSE curve identifier (see [`curves`]): P-256 (1), P-384 (2),
-/// or P-521 (3); `reader-crypto` also enables Brainpool curves (256–259)
-/// on native targets.
+/// or P-521 (3); `reader-crypto` also enables Brainpool P256r1 and P384r1.
 pub fn cose_key_from_sec1_bytes(curve_id: i64, point: &[u8]) -> Result<coset::CoseKey, MdocError> {
     let curve = SignatureCurve::from_id(i128::from(curve_id))?;
     if curve.key_type() != iana::KeyType::EC2 {
@@ -181,8 +180,8 @@ pub fn cose_key_from_sec1_bytes(curve_id: i64, point: &[u8]) -> Result<coset::Co
 }
 
 /// Convert a PEM `SubjectPublicKeyInfo` (`BEGIN PUBLIC KEY`) for P-256, P-384,
-/// P-521 or Ed25519 into a COSE public key. The native `reader-crypto` feature
-/// additionally supports Brainpool and Ed448.
+/// P-521 or Ed25519 into a COSE public key. The portable `reader-crypto` feature
+/// additionally supports Brainpool P256/P384 and Ed448.
 pub fn cose_key_from_pem(pem: &str) -> Result<coset::CoseKey, MdocError> {
     use der::DecodePem;
     use x509_cert::spki::SubjectPublicKeyInfoOwned;
@@ -302,17 +301,16 @@ impl SignatureCurve {
     }
 
     fn require_backend(self) -> Result<(), MdocError> {
-        if matches!(
-            self,
-            Self::Ed448
-                | Self::Brainpool256
-                | Self::Brainpool320
-                | Self::Brainpool384
-                | Self::Brainpool512
-        ) && !cfg!(all(feature = "reader-crypto", not(target_family = "wasm")))
+        if matches!(self, Self::Brainpool320 | Self::Brainpool512) {
+            return Err(MdocError::UnsupportedAlgorithm(
+                "Brainpool P320/P512 require a reviewed cryptographic implementation".into(),
+            ));
+        }
+        if matches!(self, Self::Ed448 | Self::Brainpool256 | Self::Brainpool384)
+            && !cfg!(feature = "reader-crypto")
         {
             return Err(MdocError::UnsupportedAlgorithm(
-                "curve requires reader-crypto on a native target".into(),
+                "curve requires the portable reader-crypto feature".into(),
             ));
         }
         Ok(())

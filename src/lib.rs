@@ -9,8 +9,8 @@
 //! immutable signing inputs and verifies externally returned signatures.
 //! The `reader` module prepares device-retrieval requests and reads protocol
 //! errors. `reader-session` adds ordered encrypted reader sessions with external
-//! ECDH and DeviceMAC verification. `reader-crypto` adds native Brainpool and
-//! Ed448 signature verification; the default backend stays portable Rust.
+//! ECDH and DeviceMAC verification. `reader-crypto` adds portable Brainpool P256/P384 and Ed448 verification;
+//! `aws-lc` selects native AES-GCM for reader sessions.
 //!
 //! The protocol matrix documents supported algorithms, wire formats and tests.
 

@@ -9,7 +9,10 @@
 
 use std::{borrow::Cow, ops::Range};
 
+#[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
 use aes_gcm::{Aes256Gcm, KeyInit, aead::AeadInOut};
+#[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
+use aws_lc_rs::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -150,15 +153,15 @@ impl AgreementPublicKey {
             3 => p521::PublicKey::from_sec1_bytes(point)
                 .map(|_| ())
                 .map_err(|_| error("invalid P-521 agreement point"))?,
-            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
-            256..=259 => {
-                crate::cose::openssl_backend::ec_public_key(curve, point)?;
-            }
-            _ => {
-                return Err(error(
-                    "agreement curve requires the native reader-crypto backend",
-                ));
-            }
+            #[cfg(feature = "reader-crypto")]
+            256 => bp256::elliptic_curve::PublicKey::<bp256::BrainpoolP256r1>::from_sec1_bytes(point)
+                .map(|_| ())
+                .map_err(|_| error("invalid Brainpool P256 agreement point"))?,
+            #[cfg(feature = "reader-crypto")]
+            258 => bp384::elliptic_curve::PublicKey::<bp384::BrainpoolP384r1>::from_sec1_bytes(point)
+                .map(|_| ())
+                .map_err(|_| error("invalid Brainpool P384 agreement point"))?,
+            _ => return Err(error("agreement curve is not supported by the backend")),
         }
         Ok(key)
     }
@@ -253,9 +256,62 @@ enum Phase {
     Closed,
 }
 
+
+#[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
+type SessionCipher = LessSafeKey;
+#[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
+type SessionCipher = Aes256Gcm;
+
+#[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
+fn new_cipher(key: &[u8]) -> Result<SessionCipher, MdocError> {
+    UnboundKey::new(&AES_256_GCM, key)
+        .map(LessSafeKey::new)
+        .map_err(|_| error("invalid session key length"))
+}
+
+#[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
+fn new_cipher(key: &[u8]) -> Result<SessionCipher, MdocError> {
+    Aes256Gcm::new_from_slice(key).map_err(|_| error("invalid session key length"))
+}
+
+#[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
+fn seal(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8]) -> Result<[u8; 16], MdocError> {
+    let tag = cipher
+        .seal_in_place_separate_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), plaintext)
+        .map_err(|_| error("session request encryption failed"))?;
+    let mut bytes = [0; 16];
+    bytes.copy_from_slice(tag.as_ref());
+    Ok(bytes)
+}
+
+#[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
+fn seal(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8]) -> Result<[u8; 16], MdocError> {
+    let tag = cipher
+        .encrypt_inout_detached(&nonce.into(), &[], plaintext.into())
+        .map_err(|_| error("session request encryption failed"))?;
+    let mut bytes = [0; 16];
+    bytes.copy_from_slice(&tag);
+    Ok(bytes)
+}
+
+#[cfg(all(feature = "aws-lc", not(target_family = "wasm")))]
+fn open(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8], tag: &[u8]) -> Result<(), MdocError> {
+    cipher
+        .open_in_place_separate_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), tag, plaintext)
+        .map(|_| ())
+        .map_err(|_| error("session response authentication failed"))
+}
+
+#[cfg(not(all(feature = "aws-lc", not(target_family = "wasm"))))]
+fn open(cipher: &SessionCipher, nonce: [u8; 12], plaintext: &mut [u8], tag: &[u8]) -> Result<(), MdocError> {
+    cipher
+        .decrypt_inout_detached(&nonce.into(), &[], plaintext.into(), &aes_gcm::Tag::try_from(tag).expect("16-byte tag"))
+        .map_err(|_| error("session response authentication failed"))
+}
+
 struct Ciphers {
-    reader: Aes256Gcm,
-    device: Aes256Gcm,
+    reader: SessionCipher,
+    device: SessionCipher,
     sent: u32,
     received: u32,
 }
@@ -335,12 +391,10 @@ impl<K: ReaderKeyAgreement> ReaderSession<K> {
         let mut derived = Zeroizing::new([0u8; 32]);
         hkdf.expand(b"SKReader", derived.as_mut())
             .map_err(|_| error("session key derivation failed"))?;
-        let reader = Aes256Gcm::new_from_slice(derived.as_ref())
-            .map_err(|_| error("invalid session key length"))?;
+        let reader = new_cipher(derived.as_ref())?;
         hkdf.expand(b"SKDevice", derived.as_mut())
             .map_err(|_| error("session key derivation failed"))?;
-        let device = Aes256Gcm::new_from_slice(derived.as_ref())
-            .map_err(|_| error("invalid session key length"))?;
+        let device = new_cipher(derived.as_ref())?;
         Ok(Self {
             transcript,
             reader_key_bytes,
@@ -431,14 +485,7 @@ impl<K: ReaderKeyAgreement> ReaderSession<K> {
         output.extend_from_slice(&head[..head_len]);
         let start = output.len();
         output.extend_from_slice(request);
-        let tag = ciphers
-            .reader
-            .encrypt_inout_detached(
-                &nonce(false, counter).into(),
-                &[],
-                output[start..].as_mut().into(),
-            )
-            .map_err(|_| error("session request encryption failed"));
+        let tag = seal(&ciphers.reader, nonce(false, counter), &mut output[start..]);
         match tag {
             Ok(tag) => output.extend_from_slice(&tag),
             Err(error) => {
@@ -532,21 +579,12 @@ impl<K: ReaderKeyAgreement> ReaderSession<K> {
             .checked_sub(16)
             .ok_or_else(|| error("truncated session authentication tag"))?;
         let (plaintext, tag) = encrypted.split_at_mut(plaintext_len);
-        let tag = aes_gcm::Tag::try_from(&*tag).expect("16-byte tag");
         let ciphers = self.ciphers.as_mut().expect("active session ciphers");
         let counter = ciphers
             .received
             .checked_add(1)
             .ok_or_else(|| error("device session counter exhausted"))?;
-        ciphers
-            .device
-            .decrypt_inout_detached(
-                &nonce(true, counter).into(),
-                &[],
-                (&mut *plaintext).into(),
-                &tag,
-            )
-            .map_err(|_| error("session response authentication failed"))?;
+        open(&ciphers.device, nonce(true, counter), plaintext, tag)?;
         ciphers.received = counter;
         let root = Item::parse(plaintext)?;
         let response = crate::reader::ResponseEnvelope::from_validated(root)?;

@@ -10,7 +10,7 @@ use signature::MultipartVerifier;
 /// Verify a COSE signature given the to-be-signed data, signature bytes, and a COSE_Key.
 ///
 /// Supports ES256 (P-256), ES384 (P-384), ES512 (P-521), and EdDSA (Ed25519).
-/// On native targets `reader-crypto` adds the ISO Brainpool curves and Ed448.
+/// The portable `reader-crypto` feature adds Brainpool P256/P384 and Ed448.
 pub fn verify_cose_signature(
     tbs_data: &[u8],
     signature: &[u8],
@@ -46,8 +46,8 @@ pub(crate) enum VerificationKey {
     P384(p384::ecdsa::VerifyingKey),
     P521(p521::ecdsa::VerifyingKey),
     Ed25519(ed25519_dalek::VerifyingKey),
-    #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
-    Extended(super::openssl_backend::ExtendedVerificationKey),
+    #[cfg(feature = "reader-crypto")]
+    Extended(super::reader_crypto::ExtendedVerificationKey),
 }
 
 impl VerificationKey {
@@ -117,12 +117,15 @@ impl VerificationKey {
             )
             .map(Self::Ed25519)
             .map_err(|e| MdocError::Signature(format!("Ed25519 key: {e}"))),
-            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
-            curve => super::openssl_backend::ExtendedVerificationKey::from_bytes(bytes, curve)
-                .map(Self::Extended),
-            #[cfg(not(all(feature = "reader-crypto", not(target_family = "wasm"))))]
+            #[cfg(feature = "reader-crypto")]
+            curve @ (SignatureCurve::Brainpool256
+            | SignatureCurve::Brainpool384
+            | SignatureCurve::Ed448) => {
+                super::reader_crypto::ExtendedVerificationKey::from_bytes(bytes, curve)
+                    .map(Self::Extended)
+            }
             _ => Err(MdocError::UnsupportedAlgorithm(
-                "curve requires reader-crypto on a native target".into(),
+                "curve is not supported by the selected crypto backend".into(),
             )),
         }
     }
@@ -130,10 +133,6 @@ impl VerificationKey {
     pub(super) fn validate_device_point(&self) -> Result<(), MdocError> {
         if matches!(self, Self::Ed25519(key) if key.is_weak()) {
             return Err(MdocError::Cose("invalid device public point".into()));
-        }
-        #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
-        if let Self::Extended(key) = self {
-            key.validate_device_point()?;
         }
         Ok(())
     }
@@ -144,7 +143,7 @@ impl VerificationKey {
             Self::P384(_) => ("ES384", 96),
             Self::P521(_) => ("ES512", 132),
             Self::Ed25519(_) => ("Ed25519", 64),
-            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+            #[cfg(feature = "reader-crypto")]
             Self::Extended(key) => return key.verify(parts, signature),
         };
         if signature.len() != signature_len {
@@ -188,7 +187,7 @@ impl VerificationKey {
                 };
                 Ok(key.verify_strict(bytes, &signature).is_ok())
             }
-            #[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+            #[cfg(feature = "reader-crypto")]
             Self::Extended(_) => unreachable!("extended verification returned above"),
         }
     }
@@ -694,6 +693,6 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "reader-crypto", not(target_family = "wasm")))]
+#[cfg(all(test, feature = "reader-crypto"))]
 #[path = "reader_crypto_tests.rs"]
 mod reader_crypto_tests;
