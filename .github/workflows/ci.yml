@@ -27,6 +27,7 @@ jobs:
       - run: cargo test --locked --no-default-features
       - run: cargo test --locked --no-default-features --features issue
       - run: cargo test --locked --no-default-features --features reader-session
+      - run: cargo test --locked --no-default-features --features reader-session,reader-crypto
       - run: cargo test --locked --all-features
       - run: cargo clippy --locked --all-features --all-targets -- -D warnings
       - run: cargo doc --locked --all-features --no-deps

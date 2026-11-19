@@ -17,6 +17,7 @@ fn vectors() -> Vec<Vector> {
     include_str!("../../tests/vectors/reader_crypto/wycheproof.tsv")
         .lines()
         .filter(|line| !line.starts_with('#'))
+        .filter(|line| !matches!(line.split('\t').next(), Some("257" | "259")))
         .map(|line| {
             let fields: Vec<_> = line.split('\t').collect();
             Vector {
@@ -151,16 +152,13 @@ fn ed448_rejects_identity_forgery_and_noncanonical_points() {
 }
 
 #[test]
-fn standalone_key_validation_does_not_claim_ed448_import_checks_points() {
+fn standalone_key_validation_accepts_strict_ed448_points() {
     for v in one_per_curve() {
         let key = cose_key_from_spki(&v.spki).unwrap();
         let encoded = key.to_vec().unwrap();
         let borrowed = CoseKeyRef::parse(crate::cbor::raw::Item::parse(&encoded).unwrap()).unwrap();
         let checked = crate::cose::validate_borrowed_device_public_key(&borrowed);
-        assert_eq!(checked.is_ok(), v.curve != 7);
-        if v.curve == 7 {
-            assert!(matches!(checked, Err(MdocError::UnsupportedAlgorithm(_))));
-        }
+        assert!(checked.is_ok(), "curve {} standalone point validation", v.curve);
     }
 }
 
@@ -199,12 +197,12 @@ fn compressed_brainpool_keys_verify_and_reject_changed_parity_and_invalid_x() {
             .unwrap()
             .fill(0xff);
         assert!(verify_cose_signature(&v.message, &v.signature, &key, v.alg).is_err());
-        assert!(super::super::openssl_backend::ec_public_key(v.curve, &[0]).is_err());
+
     }
 }
 
 #[test]
-fn prepared_native_verification_is_shareable_without_mutable_session_state() {
+fn prepared_portable_verification_is_shareable_without_mutable_session_state() {
     fn send_sync<T: Send + Sync>() {}
     send_sync::<VerificationKey>();
     for v in one_per_curve() {
@@ -220,5 +218,15 @@ fn prepared_native_verification_is_shareable_without_mutable_session_state() {
                 });
             }
         });
+    }
+}
+
+#[test]
+fn unreviewed_brainpool_curves_are_explicitly_unsupported() {
+    for curve in [257i128, 259] {
+        assert!(matches!(
+            crate::cose::key::SignatureCurve::from_id(curve),
+            Err(MdocError::UnsupportedAlgorithm(_))
+        ));
     }
 }

@@ -24,28 +24,29 @@ fn independent_extended_curve_presentations_follow_the_compiled_capability() {
         let fields: Vec<_> = row.split('\t').collect();
         let issued = hex::decode(fields[3]).unwrap();
         let response = hex::decode(fields[4]).unwrap();
+        let curve: i64 = fields[1].parse().unwrap();
         let result = verify_presentation_borrowed(&response, &transcript, &options());
-        if cfg!(all(feature = "reader-crypto", not(target_family = "wasm"))) {
+        if matches!(curve, 257 | 259) {
+            assert!(result.is_err(), "{} unsupported curve", fields[0]);
+            assert!(verify_issued_borrowed(&issued, "org.example.reader", options().now).is_err());
+            continue;
+        }
+        if cfg!(feature = "reader-crypto") {
             let result = result.unwrap_or_else(|error| panic!("{}: {error}", fields[0]));
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].mso().doc_type, "org.example.reader");
             let owned = nazo_mdoc::verify_presentation(&response, &transcript, &options()).unwrap();
             assert_eq!(owned.len(), 1);
             let issuer_only = verify_issued_borrowed(&issued, "org.example.reader", options().now);
-            assert_eq!(
-                issuer_only.is_ok(),
-                fields[1] != "7",
-                "{} issuer-only",
-                fields[0]
-            );
+            assert!(issuer_only.is_ok(), "{} issuer-only", fields[0]);
         } else {
-            assert!(result.is_err(), "{} requires the native backend", fields[0]);
+            assert!(result.is_err(), "{} requires the portable reader-crypto feature", fields[0]);
             assert!(verify_issued_borrowed(&issued, "org.example.reader", options().now).is_err());
         }
     }
 }
 
-#[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+#[cfg(feature = "reader-crypto")]
 #[test]
 fn extended_curve_presentations_reject_changed_transcripts_signatures_and_claims() {
     let transcript = SessionTranscript::from_cbor(&[0x83, 0xf6, 0xf6, 0xf6]).unwrap();
@@ -53,6 +54,7 @@ fn extended_curve_presentations_reject_changed_transcripts_signatures_and_claims
     for row in include_str!("vectors/reader_crypto/presentations.tsv")
         .lines()
         .skip(1)
+        .filter(|row| !matches!(row.split('\t').nth(1), Some("257" | "259")))
     {
         let fields: Vec<_> = row.split('\t').collect();
         let response = hex::decode(fields[4]).unwrap();
@@ -88,13 +90,14 @@ fn extended_curve_presentations_reject_changed_transcripts_signatures_and_claims
     }
 }
 
-#[cfg(all(feature = "reader-crypto", not(target_family = "wasm")))]
+#[cfg(feature = "reader-crypto")]
 #[test]
 fn a_failed_extended_document_rejects_the_entire_response() {
     use ciborium::Value;
     let rows: Vec<_> = include_str!("vectors/reader_crypto/presentations.tsv")
         .lines()
         .skip(1)
+        .filter(|row| !matches!(row.split('\t').nth(1), Some("257" | "259")))
         .collect();
     let decode = |row: &str| {
         let response = hex::decode(row.split('\t').nth(4).unwrap()).unwrap();
