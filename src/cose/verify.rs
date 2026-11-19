@@ -3,6 +3,8 @@
 use crate::cose::key::algorithms;
 use crate::error::MdocError;
 use crate::model::{CoseKeyRef, CoseLabelRef};
+#[cfg(any(not(feature = "certificate-profile"), test))]
+use der::referenced::OwnedToRef;
 use signature::MultipartVerifier;
 
 /// Verify a COSE signature given the to-be-signed data, signature bytes, and a COSE_Key.
@@ -35,15 +37,6 @@ pub(crate) fn verify_cose_signature_borrowed(
     VerificationKey::from_borrowed(key, alg)?.verify(parts, signature)
 }
 
-pub(crate) fn verify_spki_signature(
-    parts: &[&[u8]],
-    signature: &[u8],
-    spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
-    alg: i64,
-) -> Result<bool, MdocError> {
-    VerificationKey::from_spki(spki, alg)?.verify(parts, signature)
-}
-
 /// A parsed public key retained by a prepared operation. All constructors check
 /// the algorithm binding before passing key material to the official verifier.
 #[derive(Debug)]
@@ -63,8 +56,16 @@ impl VerificationKey {
         Self::from_parts(borrowed_key_parts(key, alg)?, alg)
     }
 
+    #[cfg(any(not(feature = "certificate-profile"), test))]
     pub(crate) fn from_spki(
         spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
+        alg: i64,
+    ) -> Result<Self, MdocError> {
+        Self::from_spki_ref(spki.owned_to_ref(), alg)
+    }
+
+    pub(crate) fn from_spki_ref(
+        spki: x509_cert::spki::SubjectPublicKeyInfoRef<'_>,
         alg: i64,
     ) -> Result<Self, MdocError> {
         let (key_alg, bytes) = super::key::spki_key_bytes(spki)?;
@@ -536,18 +537,28 @@ mod tests {
             subject_public_key: der::asn1::BitString::from_bytes(&key.public_key_bytes().unwrap())
                 .unwrap(),
         };
-        assert!(verify_spki_signature(&parts, signature, &spki, alg).unwrap());
+        assert!(
+            VerificationKey::from_spki(&spki, alg)
+                .unwrap()
+                .verify(&parts, signature)
+                .unwrap()
+        );
         let mismatched = if alg == algorithms::ES256 {
             algorithms::ES384
         } else {
             algorithms::ES256
         };
-        assert!(verify_spki_signature(&parts, signature, &spki, mismatched).is_err());
+        assert!(VerificationKey::from_spki(&spki, mismatched).is_err());
         let changed_parts = [&message[..3], b"changed", &message[8..]];
         assert!(
             !verify_cose_signature_borrowed(&changed_parts, signature, &borrowed, alg).unwrap()
         );
-        assert!(!verify_spki_signature(&changed_parts, signature, &spki, alg).unwrap());
+        assert!(
+            !VerificationKey::from_spki(&spki, alg)
+                .unwrap()
+                .verify(&changed_parts, signature)
+                .unwrap()
+        );
     }
 
     #[test]

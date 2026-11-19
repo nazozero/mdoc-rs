@@ -166,6 +166,9 @@ fn prepare_signature<'a>(
         error => error,
     })?;
     for (namespace, elements) in &name_spaces {
+        for name in elements.keys() {
+            crate::mdl::check_device_element(doc_type, namespace, name)?;
+        }
         crate::verifier::check_key_authorizations(
             &mso.device_key_info,
             namespace,

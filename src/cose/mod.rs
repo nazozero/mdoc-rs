@@ -15,12 +15,9 @@ pub(crate) use structure::sign1_structure;
 pub(crate) use structure::{AuthenticationStructure, with_protected_bytes};
 #[cfg(feature = "issue")]
 pub(crate) use structure::{push_header, push_protected_header};
-#[cfg(feature = "issue")]
 pub(crate) use verify::VerificationKey;
 pub use verify::{validate_verification_key, verify_cose_signature};
-pub(crate) use verify::{
-    verify_cose_signature_borrowed, verify_cose_signature_parts, verify_spki_signature,
-};
+pub(crate) use verify::{verify_cose_signature_borrowed, verify_cose_signature_parts};
 
 /// Check wire labels and decode without normalizing tags into field types.
 /// The bitset records the labels that actually occurred on the wire.

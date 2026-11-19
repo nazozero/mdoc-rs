@@ -10,3 +10,9 @@ corpus.mkdir(parents=True, exist_ok=True)
 # the outer DeviceResponse grammar. Tags 2/3 must never become plain integers.
 (corpus / "nested-bignum-tags").write_bytes(bytes.fromhex("83c240c24101a16178c34106"))
 (corpus / "undefined-is-not-null").write_bytes(bytes.fromhex("81f7"))
+certificates = root / "fuzz" / "corpus" / "certificate"
+certificates.mkdir(parents=True, exist_ok=True)
+for line in (root / "tests/vectors/certificates/profiles.tsv").read_text().splitlines():
+    if not line.startswith("#"):
+        name, _, _, _, der = line.split("\t")
+        (certificates / name).write_bytes(bytes.fromhex(der))

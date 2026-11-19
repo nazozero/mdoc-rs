@@ -30,6 +30,10 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
+    pub(crate) fn date(self) -> ::time::Date {
+        self.utc.date()
+    }
+
     /// Construct an ordinary instant from Unix seconds, rejecting unsupported years.
     pub fn from_unix_seconds(seconds: i64) -> Result<Self, MdocError> {
         let utc = UtcDateTime::from_unix_timestamp(seconds)

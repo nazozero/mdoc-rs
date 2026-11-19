@@ -313,12 +313,7 @@ fn parse_datetime(value: Item<'_>) -> Result<crate::time::Timestamp, MdocError> 
         return Err(mso_error("MSO timestamps require tdate (Tag 0)"));
     }
     let text = mso_text(inner, "tdate content")?;
-    if text.len() != 20 || !text.ends_with('Z') || text.as_bytes()[10] != b'T' {
-        return Err(mso_error(
-            "MSO timestamps require whole UTC seconds with Z offset",
-        ));
-    }
-    crate::time::Timestamp::parse_rfc3339(text).map_err(|_| mso_error("invalid MSO timestamp"))
+    crate::cbor::date::parse_tdate(text).map_err(|_| mso_error("invalid MSO timestamp"))
 }
 
 fn parse_device_key_info(value: Item<'_>) -> Result<DeviceKeyInfoRef<'_>, MdocError> {

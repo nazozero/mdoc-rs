@@ -9,4 +9,4 @@ pub mod date;
 pub mod raw;
 
 pub use data_item::{decode_cbor, encode_cbor, unwrap_tag24, wrap_tag24};
-pub use date::FullDate;
+pub use date::{FullDate, FullDateRef, validate_date_tag};

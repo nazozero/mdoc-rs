@@ -137,8 +137,8 @@ fn replace_public_fixture_certificate_dates(
     not_before: Timestamp,
     not_after: Timestamp,
 ) {
-    // A fresh, genuinely self-signed public test certificate keeps certificate
-    // corruption from being the explanation. It still is not a trust anchor.
+    // Re-sign the original DS profile with the requested validity interval,
+    // so a profile failure cannot explain the time-boundary rejection.
     let original =
         x509_cert::Certificate::from_der(&hex::decode(GENUINE_CERT_HEX).unwrap()).unwrap();
     let to_time = |value: Timestamp| {
@@ -149,14 +149,25 @@ fn replace_public_fixture_certificate_dates(
             .unwrap(),
         )
     };
-    use x509_cert::builder::{Builder, CertificateBuilder, profile::cabf::Root};
-    let profile = Root::new(
-        false,
-        "CN=Public test fixture,O=nazo-mdoc tests,C=US"
-            .parse()
-            .unwrap(),
-    )
-    .unwrap();
+    use x509_cert::builder::{Builder, CertificateBuilder, profile::BuilderProfile};
+    struct OriginalProfile(x509_cert::Certificate);
+    impl BuilderProfile for OriginalProfile {
+        fn get_issuer(&self, _: &x509_cert::name::Name) -> x509_cert::name::Name {
+            self.0.tbs_certificate().issuer().clone()
+        }
+        fn get_subject(&self) -> x509_cert::name::Name {
+            self.0.tbs_certificate().subject().clone()
+        }
+        fn build_extensions(
+            &self,
+            _: x509_cert::spki::SubjectPublicKeyInfoRef<'_>,
+            _: x509_cert::spki::SubjectPublicKeyInfoRef<'_>,
+            _: &x509_cert::TbsCertificate,
+        ) -> x509_cert::builder::Result<Vec<x509_cert::ext::Extension>> {
+            Ok(self.0.tbs_certificate().extensions().unwrap().clone())
+        }
+    }
+    let profile = OriginalProfile(original.clone());
     let leaf = CertificateBuilder::new(
         profile,
         1u32.into(),

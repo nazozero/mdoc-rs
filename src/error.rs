@@ -25,6 +25,11 @@ pub enum MdocError {
     #[error("certificate error: {0}")]
     Certificate(String),
 
+    /// ISO certificate-profile failure, independent of trust/path validation.
+    #[cfg(feature = "certificate-profile")]
+    #[error(transparent)]
+    CertificateProfile(#[from] crate::certificate::CertificateProfileError),
+
     /// Signature verification failure.
     #[error("signature error: {0}")]
     Signature(String),

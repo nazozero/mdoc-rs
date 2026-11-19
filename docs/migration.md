@@ -1,4 +1,42 @@
-# Migrating from mdoc-rs 0.2.0
+# Migration
+
+## 0.3 to 0.4
+
+Version 0.4 adds the feature-gated public `MdocError::CertificateProfile` variant.
+`MdocError` is exhaustively matchable; feature unification can expose this variant
+to a downstream exhaustive match. Update those matches when enabling the feature.
+Existing verification and signing entry points remain available.
+
+ISO mDL values supplied to the builder or disclosed to verification now undergo
+Table 5 type/date validation. Standard fields cannot be supplied as DeviceSigned
+even with KeyAuthorizations. Reissue incorrectly encoded credentials; do not
+repair authenticated bytes in storage. Partial disclosures and partial issuance
+inputs remain supported; completeness of a full licence is a separate admission
+decision.
+
+Applications previously implementing Annex B should enable `certificate-profile`
+and remove their duplicate intrinsic DS checks. Both verification entry points
+and `DocumentBuilder::prepare` perform these checks automatically. Borrowed
+pending results expose `leaf_certificate()` for path integration; `into_parts`
+still returns the original document/MSO/DER slices. Without the feature, all
+certificate profile checks remain pending with the caller. Success never implies
+that the issuer is trusted.
+
+Use `check_iaca_profile` at root admission, `check_issuer_binding` with the actual
+DS issuer, and `check_iaca_link_profile(link, old_root, new_root)` for rollover.
+The caller authenticates link/root signatures and validates both root profiles;
+the helper does not derive root validity from a cross-signed intermediate.
+Use `check_x5chain_root_exclusion` once the path engine identifies the anchor.
+Keep certificate path/revocation engines, tenant trust stores and HSM operations
+in the application. `FullDateRef` and `validate_date_tag` replace allocating
+full-date validation in JSON adapters; adapters still choose the JSON mapping.
+
+The feature adds borrowed `x509-parser 0.18.1` public types. Strict DER still
+uses the existing `x509-cert` decoder because the parsers have different input
+acceptance boundaries. The empty default feature set and core crypto support
+are unchanged.
+
+## mdoc-rs 0.2.0 to nazo-mdoc 0.3
 
 The compatibility baseline is `mdoc-rs 0.2.0` at
 `9dd3ef60fb98b427065d7ad940cfbdd9a400b2bc`. Version 0.3 uses package name

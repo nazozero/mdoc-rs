@@ -5,6 +5,7 @@
 
 use crate::error::MdocError;
 use coset::iana;
+use der::referenced::OwnedToRef;
 
 /// Validate a supported signature-only device public key before issuing it.
 /// Private coordinates and unsupported algorithms must never enter an MSO.
@@ -188,7 +189,7 @@ pub fn cose_key_from_pem(pem: &str) -> Result<coset::CoseKey, MdocError> {
 pub fn cose_key_from_spki(
     spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
 ) -> Result<coset::CoseKey, MdocError> {
-    let (alg, bytes) = spki_key_bytes(spki)?;
+    let (alg, bytes) = spki_key_bytes(spki.owned_to_ref())?;
     if alg == algorithms::EDDSA {
         return Ok(coset::CoseKeyBuilder::new_okp_key()
             .param(-1, ciborium::Value::Integer(curves::ED25519.into()))
@@ -207,7 +208,7 @@ pub fn cose_key_from_spki(
 /// Read the algorithm and original public point without converting through an
 /// owned COSE key. This preserves the SPKI restrictions of the public adapter.
 pub(super) fn spki_key_bytes(
-    spki: &x509_cert::spki::SubjectPublicKeyInfoOwned,
+    spki: x509_cert::spki::SubjectPublicKeyInfoRef<'_>,
 ) -> Result<(i64, &[u8]), MdocError> {
     use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
     if spki.algorithm.oid == const_oid::ObjectIdentifier::new_unwrap("1.3.101.112") {

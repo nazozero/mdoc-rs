@@ -5,6 +5,7 @@
 
 use crate::time::Timestamp;
 use crate::{MdocError, cbor::raw::Limits, model::*, session::SessionTranscript};
+#[cfg(not(feature = "certificate-profile"))]
 use der::Decode;
 
 /// Verification time and the presentation profile's document count limit.
@@ -51,6 +52,8 @@ pub struct PendingTrustDocumentRef<'a> {
     document: IssuerSignedDocumentRef<'a>,
     mso: MsoRef<'a>,
     certificates: Vec<&'a [u8]>,
+    #[cfg(feature = "certificate-profile")]
+    leaf_certificate: x509_parser::certificate::X509Certificate<'a>,
 }
 
 impl<'a> PendingTrustDocumentRef<'a> {
@@ -66,6 +69,12 @@ impl<'a> PendingTrustDocumentRef<'a> {
     }
     pub fn device_key(&self) -> &CoseKeyRef<'a> {
         &self.mso.device_key_info.device_key
+    }
+    /// The borrowed leaf whose Document Signer profile and MSO signature passed.
+    /// Certificate path, revocation and trust are still pending.
+    #[cfg(feature = "certificate-profile")]
+    pub fn leaf_certificate(&self) -> &x509_parser::certificate::X509Certificate<'a> {
+        &self.leaf_certificate
     }
     /// Move the borrowed document and evidence without cloning their indexes.
     pub fn into_parts(self) -> (IssuerSignedDocumentRef<'a>, MsoRef<'a>, Vec<&'a [u8]>) {
@@ -118,8 +127,6 @@ pub fn verify_presentation_borrowed<'a>(
     }
     let mut verified = Vec::with_capacity(response.documents.len());
     for document in response.documents {
-        let (mso, certificates, certificate_interval) =
-            authenticate_issuer(&document.issuer_signed.issuer_auth)?;
         let device = document
             .device_signed
             .as_ref()
@@ -129,7 +136,17 @@ pub fn verify_presentation_borrowed<'a>(
                 "presentation verification requires DeviceSignature".into(),
             ));
         };
+        let IssuerEvidence {
+            mso,
+            certificates,
+            interval: certificate_interval,
+            #[cfg(feature = "certificate-profile")]
+            leaf_certificate,
+        } = authenticate_issuer(&document.issuer_signed.issuer_auth)?;
         for (namespace, elements) in &device.name_spaces {
+            for name in elements.keys() {
+                crate::mdl::check_device_element(document.doc_type, namespace, name)?;
+            }
             check_key_authorizations(&mso.device_key_info, namespace, elements.keys().copied())?;
         }
         if signature.payload.is_some() {
@@ -164,10 +181,14 @@ pub fn verify_presentation_borrowed<'a>(
             ));
         }
         validate_claims(&document, &mso, options.now, certificate_interval)?;
+        #[cfg(feature = "certificate-profile")]
+        crate::certificate::check_mdl_document_attributes(&document, &leaf_certificate)?;
         verified.push(PendingTrustDocumentRef {
             document,
             mso,
             certificates,
+            #[cfg(feature = "certificate-profile")]
+            leaf_certificate,
         });
     }
     Ok(verified)
@@ -201,6 +222,8 @@ pub struct PendingIssuerTrustDocumentRef<'a> {
     document: IssuerSignedDocumentRef<'a>,
     mso: MsoRef<'a>,
     certificates: Vec<&'a [u8]>,
+    #[cfg(feature = "certificate-profile")]
+    leaf_certificate: x509_parser::certificate::X509Certificate<'a>,
 }
 
 impl<'a> PendingIssuerTrustDocumentRef<'a> {
@@ -212,6 +235,12 @@ impl<'a> PendingIssuerTrustDocumentRef<'a> {
     }
     pub fn certificates(&self) -> &[&'a [u8]] {
         &self.certificates
+    }
+    /// The borrowed leaf whose Document Signer profile and MSO signature passed.
+    /// Certificate path, revocation and trust are still pending.
+    #[cfg(feature = "certificate-profile")]
+    pub fn leaf_certificate(&self) -> &x509_parser::certificate::X509Certificate<'a> {
+        &self.leaf_certificate
     }
     /// Move the borrowed document and evidence without cloning their indexes.
     pub fn into_parts(self) -> (IssuerSignedDocumentRef<'a>, MsoRef<'a>, Vec<&'a [u8]>) {
@@ -242,8 +271,13 @@ pub fn verify_issued_borrowed<'a>(
     now: Timestamp,
 ) -> Result<PendingIssuerTrustDocumentRef<'a>, MdocError> {
     let issuer_signed = crate::parser::parse_issued_borrowed(encoded)?;
-    let (mso, certificates, certificate_interval) =
-        authenticate_issuer(&issuer_signed.issuer_auth)?;
+    let IssuerEvidence {
+        mso,
+        certificates,
+        interval: certificate_interval,
+        #[cfg(feature = "certificate-profile")]
+        leaf_certificate,
+    } = authenticate_issuer(&issuer_signed.issuer_auth)?;
     if mso.doc_type != expected_doc_type {
         return Err(MdocError::Mso(
             "docType differs from authenticated MSO".into(),
@@ -256,15 +290,27 @@ pub fn verify_issued_borrowed<'a>(
     };
     crate::cose::validate_borrowed_device_public_key(&mso.device_key_info.device_key)?;
     validate_claims(&document, &mso, now, certificate_interval)?;
+    #[cfg(feature = "certificate-profile")]
+    crate::certificate::check_mdl_document_attributes(&document, &leaf_certificate)?;
     Ok(PendingIssuerTrustDocumentRef {
         document,
         mso,
         certificates,
+        #[cfg(feature = "certificate-profile")]
+        leaf_certificate,
     })
 }
 
 type CertificateInterval = (Timestamp, Timestamp);
-type IssuerEvidence<'a> = (MsoRef<'a>, Vec<&'a [u8]>, CertificateInterval);
+struct IssuerEvidence<'a> {
+    mso: MsoRef<'a>,
+    certificates: Vec<&'a [u8]>,
+    interval: CertificateInterval,
+    #[cfg(feature = "certificate-profile")]
+    leaf_certificate: x509_parser::certificate::X509Certificate<'a>,
+}
+
+#[cfg(not(feature = "certificate-profile"))]
 
 pub(crate) fn certificate_interval(
     leaf: &x509_cert::Certificate,
@@ -287,20 +333,36 @@ fn authenticate_issuer<'a>(auth: &IssuerAuthRef<'a>) -> Result<IssuerEvidence<'a
         MdocError::Signature("issuerAuth requires an embedded MSO payload".into())
     })?;
     let certificates = auth.certificate_chain_der()?;
+    #[cfg(not(feature = "certificate-profile"))]
     let leaf = x509_cert::Certificate::from_der(certificates[0])
         .map_err(|error| MdocError::Certificate(error.to_string()))?;
-    let framing = crate::cose::AuthenticationStructure::sign1(sign1.protected.len(), payload.len());
-    if !crate::cose::verify_spki_signature(
-        &framing.parts(sign1.protected, payload),
-        sign1.signature,
+    #[cfg(feature = "certificate-profile")]
+    let leaf = crate::certificate::parse_document_signer(certificates[0])?;
+    #[cfg(not(feature = "certificate-profile"))]
+    let key = crate::cose::VerificationKey::from_spki(
         leaf.tbs_certificate().subject_public_key_info(),
         algorithm,
-    )? {
+    )?;
+    #[cfg(feature = "certificate-profile")]
+    let key =
+        crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?;
+    let framing = crate::cose::AuthenticationStructure::sign1(sign1.protected.len(), payload.len());
+    if !key.verify(&framing.parts(sign1.protected, payload), sign1.signature)? {
         return Err(MdocError::Signature("issuerAuth signature mismatch".into()));
     }
+
     let mso = auth.mso()?;
+    #[cfg(not(feature = "certificate-profile"))]
     let interval = certificate_interval(&leaf)?;
-    Ok((mso, certificates, interval))
+    #[cfg(feature = "certificate-profile")]
+    let interval = crate::certificate::interval(&leaf)?;
+    Ok(IssuerEvidence {
+        mso,
+        certificates,
+        interval,
+        #[cfg(feature = "certificate-profile")]
+        leaf_certificate: leaf,
+    })
 }
 
 fn validate_claims(
@@ -343,6 +405,28 @@ fn validate_claims(
         ));
     }
     crate::disclosure::verify_borrowed_disclosure(&document.issuer_signed.name_spaces, mso)?;
+    if document.doc_type == crate::mdl::DOC_TYPE
+        && let Some(items) = document
+            .issuer_signed
+            .name_spaces
+            .get(crate::mdl::NAMESPACE)
+    {
+        let (mut country, mut jurisdiction) = (None, None);
+        for item in items {
+            if item.element_identifier == "issuing_country" {
+                country = item.element_value.as_text();
+            }
+            if item.element_identifier == "issuing_jurisdiction" {
+                jurisdiction = item.element_value.as_text();
+            }
+            crate::mdl::validate_element(
+                item.element_identifier,
+                item.element_value,
+                validity.valid_from,
+            )?;
+        }
+        crate::mdl::check_jurisdiction(country, jurisdiction)?;
+    }
     Ok(())
 }
 

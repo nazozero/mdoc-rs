@@ -33,8 +33,10 @@ digests, document type, device-key authorizations and MSO validity. It returns
 `PendingTrustDocumentRef`, whose document, MSO and certificate bytes borrow the
 response buffer. Keep that buffer alive while using the evidence. The application completes:
 
-- X.509 path validation against its trusted issuers, including the document
-  signer profile and certificate revocation.
+- X.509 path validation against its trusted issuers and certificate revocation.
+- Path-dependent ISO certificate bindings using `certificate` helpers when
+  `certificate-profile` is enabled; otherwise all certificate profile checks
+  remain pending with the caller.
 - Credential status checks using the authenticated MSO `status` extension.
 - Request freshness, nonce consumption, requested claims and authorization.
 
@@ -96,8 +98,33 @@ The result encodes the `IssuerSigned` object used by OpenID4VCI 1.0 Final A.2.4.
 `response_builder` provides the same workflow for holder signatures.
 
 Attributes are explicit CBOR values. Applications choose date tags and other
-schema types for their namespaces. Status references are supplied by the issuer;
+schema types for their namespaces. The `mdl` module enforces the encodings of
+supplied ISO mDL fields, issue-date bounds and issuer-only Table 5 claims.
+Partial disclosure does not require every mandatory licence field. It does not
+decode portrait/biometric payload formats or validate domestic schemas.
+Status references are supplied by the issuer;
 the application manages their allocation and publication.
+
+## ISO certificate profiles
+
+Enable `certificate-profile` to enforce ISO/IEC 18013-5:2021 Annex B Document
+Signer constraints automatically in issuance and both verification APIs.
+`PendingTrustDocumentRef::leaf_certificate()` and its issuer-only counterpart
+expose the borrowed parsed leaf for the application's existing X.509 engine.
+
+`certificate::check_iaca_profile`, `check_issuer_binding` and
+`check_iaca_link_profile(link, old_root, new_root)` check the corresponding
+profile fields. The caller supplies the actual authenticated path and both
+rollover root certificates; a link alone cannot prove the old root's expiry.
+Check each root's profile and self-signature separately. After path selection,
+`check_x5chain_root_exclusion` rejects a transmitted trust root as Annex B.1.1
+requires. These functions do not select trust anchors, verify certificate
+signatures, fetch CRLs or construct certification paths.
+
+The profile feature retains strict `x509-cert` DER decoding and adds borrowed
+`x509-parser` extension views. The latter accepts some non-DER inputs and cannot
+replace the strict decoder safely. This retained parse cost preserves the
+existing input boundary. No X.509 path engine or application dependency is added.
 
 ## Protocol support
 
@@ -112,6 +139,8 @@ the application manages their allocation and publication.
 | CBOR input | Definite lengths, shortest integer/length encodings, unique integer/text/byte-string map keys, valid UTF-8 and preserved tags; false, true, null and IEEE floats |
 | CBOR limits | 1 MiB per envelope, depth 32, 65,536 items and 4,096 entries per collection; configurable through `parse_with_limits` |
 | Time | Explicit `Timestamp`, UTC whole-second MSO encoding and preserved leap-second ordering |
+| mDL data | Supplied Table 5 field types, date tags, driving privileges, age/biometric field families, issuer-only placement and country/jurisdiction bindings |
+| Certificate profiles (`certificate-profile`) | 2021 Annex B DS, IACA and rollover-link fields; authenticated path/root evidence supplied by the caller |
 
 Unsupported MSO and DeviceKeyInfo security fields are rejected during verification. Positive RFU
 `keyInfo` labels are preserved and ignored as required by ISO. The complete
@@ -130,10 +159,11 @@ reader authentication and complete MAC session setup, is tracked in
 | `issue` | Credential and response builders, encoding, OS entropy for salts |
 | `debug` | CBOR diagnostic formatting |
 | `wasm-js` | JavaScript entropy integration for issuance on `wasm32-unknown-unknown` |
+| `certificate-profile` | Automatic ISO DS profile enforcement, borrowed leaf access and IACA/rollover evidence helpers; optional `x509-parser` and `sha1` |
 
 Verification accepts an explicit time and runs without a network client or
 platform clock. See [architecture](docs/architecture.md) for the data flow and
-[migration](docs/migration.md) for changes from `mdoc-rs 0.2.0`.
+[migration](docs/migration.md) for the 0.4 changes and migration from `mdoc-rs 0.2.0`.
 
 ## Development
 
@@ -145,13 +175,17 @@ cargo test --locked --all-features
 cargo clippy --locked --all-features --all-targets -- -D warnings
 cargo audit --deny warnings
 cargo build --locked --target wasm32-unknown-unknown --no-default-features
-cargo build --locked --target wasm32-unknown-unknown --no-default-features --features issue,wasm-js
-cargo build --locked --target wasm32-wasip2 --no-default-features --features issue
+cargo build --locked --target wasm32-unknown-unknown --no-default-features --features issue,wasm-js,certificate-profile
+cargo build --locked --target wasm32-wasip2 --no-default-features --features issue,certificate-profile
 cargo +nightly fuzz run decode -- -max_total_time=120
+cargo +nightly fuzz run certificate -- -max_total_time=60
 ```
 
 Tests include ISO Annex D, official Final handover examples, independent
 signature/MAC vectors, malformed-input tests and property tests. The
+[0.4 boundary review](docs/protocol-boundaries-2026-11-19.md) records profile
+fixtures, migration decisions and the separately assessed second-edition DIS.
+The
 [core benchmark](benchmarks/core/README.md) records CPU, elapsed time, allocation
 stacks and linked consumer sizes. See the
 [borrowed-data and dependency review](docs/borrowed-dependencies-2026-11-18.md),
