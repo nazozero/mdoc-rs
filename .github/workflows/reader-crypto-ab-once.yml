@@ -6,6 +6,7 @@ permissions:
   contents: read
 jobs:
   curve-ab:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -177,4 +178,125 @@ jobs:
         with:
           name: common-core-ab-raw-2026-11-19
           path: evidence/core/
+          retention-days: 30
+
+  ed448-crrl-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff
+      - name: Build shared pure-Rust Ed448 verification microbenchmark
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ed448-screen/src
+          cat > /tmp/ed448-screen/Cargo.toml <<'TOML'
+          [package]
+          name = "ed448-screen"
+          version = "0.0.0"
+          edition = "2024"
+          [workspace]
+          [dependencies]
+          crrl = { version = "0.9.0", default-features = false, features = ["ed448"] }
+          ed448-goldilocks = { version = "=0.14.0-pre.15", default-features = false, features = ["signing"] }
+          hex = "0.4.3"
+          [profile.release]
+          opt-level = 3
+          lto = "thin"
+          codegen-units = 1
+          TOML
+          cat > /tmp/ed448-screen/src/main.rs <<'RS'
+          use std::{env, hint::black_box, time::Instant};
+
+          fn main() {
+              let source = std::fs::read_to_string(env::args().nth(1).expect("RFC8032 vectors")).unwrap();
+              let row: Vec<_> = source.lines().nth(2).unwrap().split('\t').collect();
+              let key_bytes: [u8; 57] = hex::decode(row[1]).unwrap().try_into().unwrap();
+              let message = hex::decode(row[2]).unwrap();
+              let sig = hex::decode(row[3]).unwrap();
+              let gs = ed448_goldilocks::Signature::from_slice(&sig).unwrap();
+              let gold = ed448_goldilocks::VerifyingKey::from_bytes(&key_bytes).unwrap();
+              let crrl = crrl::ed448::PublicKey::decode(&key_bytes).unwrap();
+              assert_eq!(crrl.point.is_in_subgroup(), 0xffff_ffff);
+              assert_eq!(crrl.point.isneutral(), 0);
+              assert!(gold.verify_raw(&gs, &message).is_ok());
+              assert!(crrl.verify_raw(&sig, &message));
+              for round in 1..=4 {
+                  let order = if round % 2 == 0 { ["crrl", "goldilocks"] } else { ["goldilocks", "crrl"] };
+                  for mode in ["prepared","parse_and_verify"] {
+                      for kind in order {
+                          for _ in 0..100 {
+                              assert!(operation(kind, mode, &key_bytes, &sig, &message, &gold, &gs, &crrl));
+                          }
+                          for _ in 0..1000 {
+                              let start = Instant::now();
+                              let accepted = operation(
+                                  black_box(kind), black_box(mode), black_box(&key_bytes),
+                                  black_box(&sig), black_box(&message), black_box(&gold),
+                                  black_box(&gs), black_box(&crrl),
+                              );
+                              let duration = start.elapsed().as_nanos();
+                              assert!(accepted);
+                              println!("{round},{mode},{kind},{duration}");
+                          }
+                      }
+                  }
+              }
+          }
+
+          fn operation(
+              kind: &str, mode: &str, pk: &[u8;57], sig: &[u8],
+              msg: &[u8], gold: &ed448_goldilocks::VerifyingKey,
+              gs: &ed448_goldilocks::Signature, c: &crrl::ed448::PublicKey,
+          ) -> bool {
+              match (kind,mode) {
+                  ("goldilocks","prepared") => gold.verify_raw(gs,msg).is_ok(),
+                  ("crrl","prepared") => c.verify_raw(sig,msg),
+                  ("goldilocks","parse_and_verify") => {
+                      ed448_goldilocks::VerifyingKey::from_bytes(pk)
+                          .is_ok_and(|key| key.verify_raw(gs,msg).is_ok())
+                  },
+                  ("crrl","parse_and_verify") => {
+                      crrl::ed448::PublicKey::decode(pk)
+                          .filter(|key| key.point.is_in_subgroup()==0xffff_ffff && key.point.isneutral()==0)
+                          .is_some_and(|key| key.verify_raw(sig,msg))
+                  },
+                  _ => panic!("unexpected benchmark case"),
+              }
+          }
+          RS
+          CARGO_BUILD_JOBS=2 cargo build --release --manifest-path /tmp/ed448-screen/Cargo.toml
+      - name: Measure pure Rust Ed448 implementations on one pinned CPU
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          cpu="$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')"
+          printf 'round,mode,impl,wall_ns\n' > evidence/ed448-pure-samples.csv
+          taskset -c "$cpu" /tmp/ed448-screen/target/release/ed448-screen \
+            tests/vectors/reader_crypto/rfc8032.tsv >> evidence/ed448-pure-samples.csv
+          python3 - <<'PY'
+          import csv,math,statistics,collections
+          d=collections.defaultdict(list)
+          for row in csv.DictReader(open('evidence/ed448-pure-samples.csv')):
+              d[(row['round'],row['mode'],row['impl'])].append(int(row['wall_ns']))
+          assert len(d)==16
+          for mode in ('prepared','parse_and_verify'):
+              print(mode)
+              for implementation in ('goldilocks','crrl'):
+                  vals={}
+                  for percentile in (50,95,99):
+                      ps=[]
+                      for round in '1234':
+                          a=sorted(d[(round,mode,implementation)])
+                          assert len(a)==1000
+                          ps.append(a[math.ceil(len(a)*percentile/100)-1])
+                      vals[percentile]=statistics.median(ps)/1000
+                  print(f"  {implementation}: P50={vals[50]:.3f}us P95={vals[95]:.3f}us P99={vals[99]:.3f}us")
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ed448-implementation-screen-2026-11-19
+          path: evidence/ed448-pure-samples.csv
           retention-days: 30
