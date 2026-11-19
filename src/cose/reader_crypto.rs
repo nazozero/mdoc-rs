@@ -21,13 +21,16 @@ impl ExtendedVerificationKey {
             SignatureCurve::Brainpool384 => ecdsa::VerifyingKey::from_sec1_bytes(bytes)
                 .map(Self::Brainpool384)
                 .map_err(|_| MdocError::Signature("invalid Brainpool P384 public point".into())),
-            SignatureCurve::Ed448 => ed448_goldilocks::VerifyingKey::from_bytes(
-                bytes
-                    .try_into()
-                    .map_err(|_| MdocError::Signature("Ed448 key length".into()))?,
-            )
-            .map(Self::Ed448)
-            .map_err(|_| MdocError::Signature("invalid Ed448 public point".into())),
+            SignatureCurve::Ed448 => {
+                if !canonical_ed448_point(bytes) {
+                    return Err(MdocError::Signature("noncanonical Ed448 public point".into()));
+                }
+                ed448_goldilocks::VerifyingKey::from_bytes(
+                    bytes.try_into().expect("canonical Ed448 points have length 57"),
+                )
+                .map(Self::Ed448)
+                .map_err(|_| MdocError::Signature("invalid Ed448 public point".into()))
+            }
             _ => Err(MdocError::UnsupportedAlgorithm(
                 "unsupported extended signature curve".into(),
             )),
@@ -51,10 +54,13 @@ impl ExtendedVerificationKey {
                 Ok(key.multipart_verify(parts, &signature).is_ok())
             }
             Self::Ed448(key) => {
-                let signature =
+                let parsed =
                     ed448_goldilocks::Signature::from_slice(signature).map_err(|_| {
                         MdocError::Signature("Ed448 signature must be 114 bytes".into())
                     })?;
+                if !canonical_ed448_point(&signature[..57]) {
+                    return Ok(false);
+                }
                 let message;
                 let bytes = if let [part] = parts {
                     *part
@@ -62,8 +68,50 @@ impl ExtendedVerificationKey {
                     message = parts.concat();
                     &message
                 };
-                Ok(key.verify_raw(&signature, bytes).is_ok())
+                Ok(key.verify_raw(&parsed, bytes).is_ok())
             }
         }
+    }
+}
+
+/// RFC 8032 §5.2.2: Ed448 has a 448-bit y coordinate and one sign bit.
+/// Reject unused high bits and y >= 2^448 - 2^224 - 1 before point decoding.
+/// The comparison is public-data only and does not allocate.
+fn canonical_ed448_point(bytes: &[u8]) -> bool {
+    if bytes.len() != 57 || bytes[56] & 0x7f != 0 {
+        return false;
+    }
+    const MODULUS: [u8; 56] = {
+        let mut p = [0xff; 56];
+        p[28] = 0xfe;
+        p
+    };
+    for i in (0..56).rev() {
+        if bytes[i] != MODULUS[i] {
+            return bytes[i] < MODULUS[i];
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::canonical_ed448_point;
+
+    #[test]
+    fn ed448_y_is_strictly_below_field_modulus_and_unused_bits_are_clear() {
+        let mut p = [0xff; 57];
+        p[28] = 0xfe;
+        p[56] = 0;
+        assert!(!canonical_ed448_point(&p), "y == p");
+        p[28] = 0xff;
+        assert!(!canonical_ed448_point(&p), "y > p");
+        p[28] = 0xfe;
+        p[0] = 0xfe;
+        assert!(canonical_ed448_point(&p), "y == p-1 is canonical");
+        p[56] = 1;
+        assert!(!canonical_ed448_point(&p), "unused top bit");
+        p[56] = 0x80;
+        assert!(canonical_ed448_point(&p), "sign bit is permitted");
     }
 }

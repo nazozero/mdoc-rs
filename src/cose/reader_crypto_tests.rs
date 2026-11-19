@@ -233,3 +233,35 @@ fn unreviewed_brainpool_curves_are_explicitly_unsupported() {
         ));
     }
 }
+
+#[test]
+fn ed448_rejects_noncanonical_aliases_before_signature_verification() {
+    let fields: Vec<_> = include_str!("../../tests/vectors/reader_crypto/rfc8032.tsv")
+        .lines()
+        .nth(1)
+        .unwrap()
+        .split('\t')
+        .collect();
+    let mut key_bytes = hex::decode(fields[1]).unwrap();
+    let message = hex::decode(fields[2]).unwrap();
+    let signature = hex::decode(fields[3]).unwrap();
+    assert_eq!(key_bytes[56] & 0x7f, 0);
+    let key = coset::CoseKeyBuilder::new_okp_key()
+        .param(-1, 7.into())
+        .param(-2, ciborium::Value::Bytes(key_bytes.clone()))
+        .build();
+    assert!(verify_cose_signature(&message, &signature, &key, algorithms::EDDSA).unwrap());
+
+    key_bytes[56] |= 1;
+    let alias = coset::CoseKeyBuilder::new_okp_key()
+        .param(-1, 7.into())
+        .param(-2, ciborium::Value::Bytes(key_bytes))
+        .build();
+    assert!(VerificationKey::from_cose(&alias, algorithms::EDDSA).is_err());
+
+    let mut altered_signature = signature;
+    altered_signature[56] |= 1;
+    assert!(!verify_cose_signature(
+        &message, &altered_signature, &key, algorithms::EDDSA
+    ).unwrap());
+}
