@@ -1,0 +1,178 @@
+name: One-time reader crypto performance verification
+on:
+  push:
+    branches: [feat/iso-reader-issue-3]
+permissions:
+  contents: read
+jobs:
+  curve-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff
+      - name: Build independently linked previous and portable crypto consumers
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mdoc-perf/{old,new}/src
+          cat > /tmp/mdoc-perf/main.rs <<'RS'
+          use std::{env, hint::black_box, time::Instant};
+          use der::Decode;
+
+          fn main() {
+              let file = std::fs::read_to_string(env::args().nth(1).expect("fixture path")).unwrap();
+              for curve in [256i64, 258, 7] {
+                  let fields: Vec<_> = file.lines()
+                      .filter(|row| !row.starts_with('#'))
+                      .map(|row| row.split('\t').collect::<Vec<_>>())
+                      .find(|fields| {
+                          fields.len() >= 8 &&
+                          fields[0].parse::<i64>().ok() == Some(curve) &&
+                          fields[3] == "valid" && !fields[5].is_empty()
+                      })
+                      .expect("valid nonempty independent curve vector");
+                  let alg: i64 = fields[1].parse().unwrap();
+                  let spki = x509_cert::spki::SubjectPublicKeyInfoOwned::from_der(
+                      &hex::decode(fields[4]).unwrap(),
+                  ).unwrap();
+                  let key = nazo_mdoc::cose::key::cose_key_from_spki(&spki).unwrap();
+                  let message = hex::decode(fields[5]).unwrap();
+                  let signature = hex::decode(fields[6]).unwrap();
+                  for _ in 0..100 {
+                      assert!(nazo_mdoc::cose::verify_cose_signature(&message, &signature, &key, alg).unwrap());
+                  }
+                  let mut durations = Vec::with_capacity(1000);
+                  for _ in 0..1000 {
+                      let started = Instant::now();
+                      let accepted = nazo_mdoc::cose::verify_cose_signature(
+                          black_box(&message), black_box(&signature), black_box(&key), black_box(alg)
+                      ).unwrap();
+                      let elapsed = started.elapsed().as_nanos();
+                      assert!(accepted);
+                      durations.push(elapsed);
+                  }
+                  for elapsed in durations { println!("{curve},{elapsed}"); }
+              }
+          }
+          RS
+          cat > /tmp/mdoc-perf/Cargo.toml <<'TOML'
+          [package]
+          name = "mdoc-curve-ab"
+          version = "0.0.0"
+          edition = "2024"
+          [dependencies]
+          nazo-mdoc = { git = "https://github.com/nazozero/nazo-mdoc", rev = "@@REV@@", default-features = false, features = ["reader-crypto"] }
+          coset = "0.4.2"
+          der = "0.8.3"
+          x509-cert = "0.3.0"
+          hex = "0.4.3"
+          [profile.release]
+          opt-level = 3
+          lto = "thin"
+          codegen-units = 1
+          TOML
+          for kind in old new; do
+            if [ "$kind" = old ]; then rev=feae88b64f771d1af11617bf3814ce49822b6727; else rev=25055bc6e0ae701981bacfec0cc7742a9a338e25; fi
+            sed "s/@@REV@@/$rev/g" /tmp/mdoc-perf/Cargo.toml > "/tmp/mdoc-perf/$kind/Cargo.toml"
+            cp /tmp/mdoc-perf/main.rs "/tmp/mdoc-perf/$kind/src/main.rs"
+            CARGO_BUILD_JOBS=2 cargo build --release --manifest-path "/tmp/mdoc-perf/$kind/Cargo.toml" --target-dir "/tmp/mdoc-perf/$kind/target"
+            sha256sum "/tmp/mdoc-perf/$kind/target/release/mdoc-curve-ab"
+            stat -c 'consumer_bytes=%s' "/tmp/mdoc-perf/$kind/target/release/mdoc-curve-ab"
+            ldd "/tmp/mdoc-perf/$kind/target/release/mdoc-curve-ab" || true
+          done
+      - name: Measure P50 P95 P99 with alternating pinned-CPU AB/BA
+        run: |
+          set -euo pipefail
+          cpu="$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')"
+          mkdir -p evidence
+          printf 'round,variant,curve,wall_ns\n' > evidence/curve-samples.csv
+          for round in 1 2 3 4; do
+            if (( round % 2 )); then order="old new"; else order="new old"; fi
+            for variant in $order; do
+              echo "round=$round variant=$variant pinned_cpu=$cpu"
+              taskset -c "$cpu" "/tmp/mdoc-perf/$variant/target/release/mdoc-curve-ab" \
+                tests/vectors/reader_crypto/wycheproof.tsv |
+                awk -F, -v round="$round" -v variant="$variant" \
+                  '{print round "," variant "," $1 "," $2}' >> evidence/curve-samples.csv
+            done
+          done
+          python3 - <<'PY'
+          import csv, math, statistics, collections
+          d=collections.defaultdict(list)
+          for row in csv.DictReader(open('evidence/curve-samples.csv')):
+              d[(row['round'],row['variant'],row['curve'])].append(int(row['wall_ns']))
+          assert len(d)==24
+          for curve in ('256','258','7'):
+              print('curve='+curve)
+              totals={}
+              for variant in ('old','new'):
+                  p={}
+                  for percentile in (50,95,99):
+                      values=[]
+                      for r in '1234':
+                          samples=sorted(d[(r,variant,curve)])
+                          assert len(samples)==1000
+                          values.append(samples[math.ceil(len(samples)*percentile/100)-1])
+                      p[percentile]=statistics.median(values)/1000
+                  totals[variant]=p
+                  print(f"  {variant}: P50={p[50]:.3f}us P95={p[95]:.3f}us P99={p[99]:.3f}us")
+              print('  relative_p50_pct='+str(round(100*(totals['new'][50]/totals['old'][50]-1),2)))
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: curve-ab-raw-2026-11-19
+          path: evidence/curve-samples.csv
+          retention-days: 30
+  common-core-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d5e4d57b030548f435d0befec15ff413a2c60eff
+      - name: Build exact main baseline and current issue feature with independent binaries
+        run: |
+          set -euo pipefail
+          sed -i 's/920b717f9916a7dda1ecacd6bacf3bde84d75495/fa8235420699ff6135e892a04798e4ba2f667a93/g' \
+            benchmarks/core/Cargo.toml benchmarks/core/src/main.rs
+          CARGO_BUILD_JOBS=2 cargo build --release --manifest-path benchmarks/core/Cargo.toml \
+            --no-default-features --features baseline --target-dir /tmp/mdoc-core-main
+          CARGO_BUILD_JOBS=2 cargo build --release --manifest-path benchmarks/core/Cargo.toml \
+            --no-default-features --features candidate --target-dir /tmp/mdoc-core-current
+          mkdir -p /tmp/mdoc-core-check
+          /tmp/mdoc-core-main/release/mdoc-core-benchmark --check --create-fixture \
+            --fixture /tmp/mdoc-input --out /tmp/mdoc-core-check/main
+          /tmp/mdoc-core-current/release/mdoc-core-benchmark --check \
+            --fixture /tmp/mdoc-input --out /tmp/mdoc-core-check/candidate
+          diff /tmp/mdoc-core-check/main/inputs.txt /tmp/mdoc-core-check/candidate/inputs.txt
+      - name: Measure all common core cases over 4 alternating rounds
+        run: |
+          set -euo pipefail
+          cpu="$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')"
+          python3 benchmarks/core/run.py \
+            --baseline /tmp/mdoc-core-main/release/mdoc-core-benchmark \
+            --candidate /tmp/mdoc-core-current/release/mdoc-core-benchmark \
+            --fixture /tmp/mdoc-input --out evidence/core --rounds 4 --samples 1000 --warmup 100 --cpu "$cpu"
+          python3 - <<'PY'
+          import csv,statistics,collections
+          d=collections.defaultdict(list)
+          for row in csv.DictReader(open('evidence/core/summary.csv')):
+              d[(row['case'],row['variant'])].append(row)
+          for case in ('full_protocol_verify_borrowed','full_protocol_verify','issuance_complete','issuance_prepare','response_parse_borrowed'):
+              print(case)
+              for variant in ('baseline','candidate'):
+                  rows=d[(case,variant)]
+                  assert len(rows)==4
+                  vals=[statistics.median([int(r['thread_cpu_ns_p'+str(p)]) for r in rows])/1000 for p in (50,95,99)]
+                  count=statistics.median(int(r['allocations_p50']) for r in rows)
+                  bytes_=statistics.median(int(r['requested_bytes_p50']) for r in rows)
+                  print(f'  {variant}: CPU P50/P95/P99 us: {vals}; alloc_count={count}; requested_bytes={bytes_}')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: common-core-ab-raw-2026-11-19
+          path: evidence/core/
+          retention-days: 30
