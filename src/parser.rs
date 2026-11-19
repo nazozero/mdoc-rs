@@ -46,6 +46,15 @@ pub fn parse_borrowed_with_limits(
     max_documents: usize,
 ) -> Result<DeviceResponseRef<'_>, MdocError> {
     let root = Item::parse_with_limits(bytes, limits)?;
+    parse_borrowed_validated(root, limits, max_documents)
+}
+
+/// Continue from the immutable envelope validated by the session boundary.
+pub(crate) fn parse_borrowed_validated(
+    root: Item<'_>,
+    limits: Limits,
+    max_documents: usize,
+) -> Result<DeviceResponseRef<'_>, MdocError> {
     let (mut version, mut status, mut documents) = (None, None, None);
     for entry in root.map()? {
         let (key, value) = entry?;

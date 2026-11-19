@@ -4,7 +4,7 @@ version = "0.4.0"
 authors = ["NazoZero", "Kushal Das"]
 edition = "2024"
 rust-version = "1.100"
-description = "ISO mdoc issuance, parsing and signature verification"
+description = "ISO mdoc issuance and authenticated reader protocols"
 repository = "https://github.com/nazozero/nazo-mdoc"
 license = "BSD-2-Clause"
 readme = "README.md"
@@ -18,8 +18,16 @@ issue = ["dep:getrandom"]
 debug = []
 wasm-js = ["getrandom?/wasm_js"]
 certificate-profile = ["dep:sha1", "dep:x509-parser"]
+reader-session = ["dep:aes-gcm", "dep:zeroize", "hmac/zeroize", "sha2/zeroize"]
+reader-crypto = ["dep:bp256", "dep:bp384", "dep:ecdsa", "dep:ed448-goldilocks"]
+aws-lc = ["dep:aws-lc-rs"]
 
 [dependencies]
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "zeroize"], optional = true }
+bp256 = { version = "0.14.0", default-features = false, features = ["arithmetic", "ecdsa", "sha256"], optional = true }
+bp384 = { version = "0.14.0", default-features = false, features = ["arithmetic", "ecdsa", "sha384"], optional = true }
+ecdsa = { version = "0.17.0", default-features = false, features = ["algorithm"], optional = true }
+ed448-goldilocks = { version = "=0.14.0-pre.15", default-features = false, features = ["signing"], optional = true }
 ciborium = "0.2.2"
 coset = "0.4.2"
 const-oid = { version = "0.10.3", features = ["db"] }
@@ -40,9 +48,14 @@ thiserror = "2.0.21"
 time = { version = "0.3.55", default-features = false, features = ["std", "parsing", "formatting"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["std", "pem"] }
 x509-parser = { version = "0.18.1", default-features = false, optional = true }
+zeroize = { version = "1.9.2", default-features = false, features = ["alloc"], optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+aws-lc-rs = { version = "1.19.0", default-features = false, features = ["non-fips"], optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
-p256 = { version = "0.14.0", default-features = false, features = ["pkcs8"] }
+tempfile = "3.23.0"
+p256 = { version = "0.14.0", default-features = false, features = ["pkcs8", "ecdh"] }
 x509-cert = { version = "0.3.0", default-features = false, features = ["builder"] }

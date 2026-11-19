@@ -2,7 +2,8 @@
 
 A Rust library for issuing, parsing and authenticating ISO mdoc credentials.
 It provides CBOR/COSE processing, selective disclosure, external signing and
-OpenID4VP 1.0 Final session binding.
+OpenID4VP 1.0 Final session binding. Optional reader features add ISO device
+retrieval sessions and portable cipher-suite-1 signature curves.
 
 The package is `nazo-mdoc`; the Rust crate is `nazo_mdoc`. Rust 1.100 or later
 is required. For a Git dependency, pin the full commit revision you have tested.
@@ -72,7 +73,9 @@ bytes remain borrowed until they are written into that response.
 ECDSA and HMAC verification consume message fragments directly. Strict Ed25519
 verification uses a contiguous message, and X.509 decoding uses the upstream
 certificate model. Namespace and digest indexes store references in collections.
-New wire output and external signing inputs have their own buffers.
+New wire output and external signing inputs have their own buffers. Brainpool
+verification hashes borrowed fragments; Ed448 assembles a contiguous message
+only when multiple fragments are supplied.
 
 ## Issuance
 
@@ -126,15 +129,84 @@ The profile feature retains strict `x509-cert` DER decoding and adds borrowed
 replace the strict decoder safely. This retained parse cost preserves the
 existing input boundary. No X.509 path engine or application dependency is added.
 
+## Device-retrieval reader
+
+`reader::ItemsRequest` checks and borrows the original Tag 24 request. Use
+`unsigned()` for a request without reader authentication, or
+`prepare_reader_authentication` / `finish` with an external signer. Reader
+certificate identity, path and retention policy belong to the application.
+The returned signature is checked against the supplied certificate public key.
+
+Enable `reader-session` for ISO/IEC 18013-5:2021 cipher-suite-1 sessions:
+
+```rust,ignore
+use nazo_mdoc::reader::{ItemsRequest, encode_device_request};
+use nazo_mdoc::session::reader::{Handover, ReaderResponse, ReaderSession};
+
+let mut reader = ReaderSession::new(
+    received_device_engagement,
+    Handover::Qr,
+    fresh_reader_ephemeral_key, // Implements ReaderKeyAgreement; private key stays in the adapter.
+)?;
+let items = ItemsRequest::from_bytes(items_request_bytes)?;
+let request = encode_device_request(&[items.unsigned()])?;
+let outgoing = reader.encrypt_request(&request)?;
+transport.send(&outgoing).await?;
+let mut incoming = transport.receive().await?;
+match reader.receive_response(&mut incoming, &verification_options)? {
+    ReaderResponse::Authenticated { documents, .. } => {
+        for document in documents {
+            application.check_trust_and_policy(document).await?;
+        }
+    }
+    ReaderResponse::Protocol { response, .. } => application.handle_protocol_response(response)?,
+    ReaderResponse::Status(status) => application.handle_session_status(status)?,
+}
+```
+
+The executable consumer flows in [session_reader.rs](tests/session_reader.rs)
+and [session_agreement_curves.rs](tests/session_agreement_curves.rs) supply
+private-key adapters and independent full-session inputs. Their fixed private
+keys are public test material; deployed adapters generate fresh keys.
+
+`ReaderKeyAgreement` owns one fresh ephemeral private key and performs ECDH with
+the validated peer selected by the core. The session binds the original
+engagement, reader key and QR/NFC handover; derives separate encryption/MAC keys;
+and owns the two message counters. Encryption writes its wire output directly;
+decryption is in place and verified claims borrow the received buffer.
+
+DeviceSignature and DeviceMAC share issuer, MSO, disclosure, authorization and
+pending-trust checks. Verification never falls back after a failed proof.
+Protocol errors return an untrusted `ResponseEnvelope`; mixed or error-bearing
+responses do not yield partial authenticated documents. Each session needs
+exclusive mutable access; independent sessions have no shared counters or lock.
+
+Adapters implement NFC/BLE/QR acquisition, retrieval options, channel closure,
+timeouts and destruction of the ephemeral private key. Call `close()` on a
+transport failure or timeout. Use `terminate()` to close locally and send the
+session-termination status. The adapter sends termination/error statuses and
+closes its channel; a received terminal status closes the channel after any
+authenticated data is processed. A closed session cannot restart. The session
+also enforces the two-age-attestation limit across its requests; the application
+enforces each element's retention intent.
+
+The existing `verify_presentation*` entry points remain DeviceSignature-only.
+Enabling a library feature does not provision a reader transport or opt an
+application into MAC authentication.
+
 ## Protocol support
 
 | Area | Support |
 | --- | --- |
 | Issuer and holder signatures | ES256/P-256, ES384/P-384, ES512/P-521 and EdDSA/Ed25519; fixed-width COSE ECDSA signatures and strict Ed25519 verification |
+| Portable reader signatures (`reader-crypto`) | Brainpool P256/P384 and Ed448 via pure Rust, including WASM |
+| Reader algorithm gaps | Brainpool P320/P512 are rejected until a suitable reviewed implementation is available |
 | MSO digests | SHA-256, SHA-384 and SHA-512 with matching digest lengths |
 | Versions | Emit `1.0`; receive numeric minor versions of major version 1 |
-| Session binding | OpenID4VP 1.0 Final Redirect and DC API handovers |
-| Device authentication | DeviceSignature in the presentation verifier; separate DeviceMAC and HKDF primitives for caller-established sessions |
+| Session binding | OpenID4VP 1.0 Final Redirect and DC API handovers; original QR/NFC device-retrieval handovers with `reader-session` |
+| Device authentication | DeviceSignature in the presentation verifier; session-bound DeviceSignature/DeviceMAC with `reader-session`; separate low-level DeviceMAC/HKDF primitives |
+| Reader protocol | Borrowed ItemsRequest, external reader authentication, DeviceRequest encoding and untrusted response/error inspection |
+| Session encryption (`reader-session`) | External ECDH, HKDF-SHA-256, AES-256-GCM, ordered directional counters and termination |
 | Authenticated bytes | Preserve received Tag 24 envelopes, protected headers and payloads |
 | CBOR input | Definite lengths, shortest integer/length encodings, unique integer/text/byte-string map keys, valid UTF-8 and preserved tags; false, true, null and IEEE floats |
 | CBOR limits | 1 MiB per envelope, depth 32, 65,536 items and 4,096 entries per collection; configurable through `parse_with_limits` |
@@ -147,9 +219,11 @@ Unsupported MSO and DeviceKeyInfo security fields are rejected during verificati
 authenticated `status` value is retained for application policy.
 
 The [protocol matrix](docs/protocol-matrix.md) maps requirements to code and
-tests. Full ISO reader support, including Brainpool/Ed448, proximity engagement,
-reader authentication and complete MAC session setup, is tracked in
-[issue #3](https://github.com/nazozero/nazo-mdoc/issues/3).
+tests. The [edition-specific reader inventory](docs/iso-reader-conformance.md)
+records each role, native/WASM limits and remaining adapter, interoperability
+and official-test evidence for [issue #3](https://github.com/nazozero/nazo-mdoc/issues/3).
+Ed448 public-point decoding checks subgroup membership and rejects identity,
+so standalone device-key validation and complete signature verification are supported.
 
 ## Features
 
@@ -160,6 +234,9 @@ reader authentication and complete MAC session setup, is tracked in
 | `debug` | CBOR diagnostic formatting |
 | `wasm-js` | JavaScript entropy integration for issuance on `wasm32-unknown-unknown` |
 | `certificate-profile` | Automatic ISO DS profile enforcement, borrowed leaf access and IACA/rollover evidence helpers; optional `x509-parser` and `sha1` |
+| `reader-session` | ISO device-retrieval reader state, external ECDH, AES-GCM and secret-buffer cleanup; no transport or private-key implementation |
+| `reader-crypto` | Portable Brainpool P256/P384 and Ed448 signature and point validation on native/WASM |
+| `aws-lc` | Use AWS-LC 1.19 native AES-GCM for reader sessions; WASM retains RustCrypto |
 
 Verification accepts an explicit time and runs without a network client or
 platform clock. See [architecture](docs/architecture.md) for the data flow and
@@ -171,12 +248,15 @@ platform clock. See [architecture](docs/architecture.md) for the data flow and
 cargo fmt --check
 cargo test --locked --no-default-features
 cargo test --locked --no-default-features --features issue
+cargo test --locked --no-default-features --features reader-session
+cargo test --locked --no-default-features --features reader-session,reader-crypto
 cargo test --locked --all-features
 cargo clippy --locked --all-features --all-targets -- -D warnings
 cargo audit --deny warnings
 cargo build --locked --target wasm32-unknown-unknown --no-default-features
 cargo build --locked --target wasm32-unknown-unknown --no-default-features --features issue,wasm-js,certificate-profile
 cargo build --locked --target wasm32-wasip2 --no-default-features --features issue,certificate-profile
+cargo build --locked --target wasm32-wasip2 --no-default-features --features reader-session
 cargo +nightly fuzz run decode -- -max_total_time=120
 cargo +nightly fuzz run certificate -- -max_total_time=60
 ```

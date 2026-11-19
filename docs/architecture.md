@@ -1,8 +1,10 @@
 # Architecture
 
 `nazo-mdoc` is one library with borrowed protocol views and explicit owned
-models for independent storage. Applications provide signing, trust policy, credential status and
-transport.
+models for independent storage. Applications provide signing, trust policy,
+credential status and transport. Reader key agreement also stays behind an
+external private-key operation; the optional reader session owns protocol state
+and symmetric keys.
 
 ## Verification flow
 
@@ -39,10 +41,45 @@ The prepared bytes and their key context are immutable. This lets an application
 use either a synchronous local signer or an asynchronous external signer without
 introducing a signing service into the library.
 
+Reader authentication uses the same contract in `reader`: an immutable borrowed
+`ItemsRequest` and session transcript form `ReaderAuthenticationBytes`. The
+prepared operation retains the certificate verification key and complete signing
+input. `finish` verifies the external signature and writes a detached ReaderAuth;
+`encode_device_request` preserves the original ItemsRequestBytes. Reader identity
+and certificate policy are supplied by the host.
+
 Attributes retain the caller's CBOR types. Namespace-specific schema mapping
 belongs to the application; `mdl` validates supplied standard mDL encodings.
 Issuance uses deterministic CBOR; wire encoders copy
 already signed fields verbatim.
+
+## Reader sessions
+
+The `reader-session` feature adds `session::reader::ReaderSession`. Its
+`ReaderKeyAgreement` provider owns one fresh ephemeral private key and implements
+ECDH with the validated peer selected by the core. The constructor binds the
+original DeviceEngagement, reader COSE key and QR/NFC handover. Encryption keys
+and the holder MAC key use distinct HKDF contexts.
+
+Each session owns separate directional AES-GCM counters and an ordered
+request/response state. Mutations require `&mut self`; independent sessions have
+no shared lock. A session cannot clone or restart its counters. Failure and
+termination drop its ciphers and private-key provider. The provider's lifecycle
+contract includes destroying or releasing the ephemeral key; its transport
+adapter owns channel closure and timeout scheduling.
+
+Requests are checked by the request encoder before encryption. Replies decrypt
+in place and the resulting authenticated claims borrow that plaintext. A
+validated CBOR item is reused between response-envelope inspection and credential
+parsing. Error-bearing replies expose untrusted protocol data without partial
+credential admission. Successful replies reuse the issuer/disclosure/authorization
+verifier for either DeviceSignature or session-bound DeviceMAC.
+
+`reader-crypto` adds portable Brainpool P256/P384 and Ed448 verification.
+Curve identity remains distinct from COSE algorithm. Brainpool P320/P512
+remain unsupported pending a suitable reviewed implementation.
+Reader AES-GCM uses RustCrypto by default; `aws-lc` selects AWS-LC on native
+targets without changing the ECDH adapter or session security state.
 
 ## Ownership
 
@@ -60,9 +97,9 @@ already signed fields verbatim.
 - `into_owned` copies into independent storage. The old owned APIs use this
   conversion after the shared borrowed path. Their certificate-chain return
   contract retains a separate owned chain alongside the owned COSE headers.
-- ECDSA verification hashes message fragments through RustCrypto's multipart
-  interface. HMAC updates from the same borrowed framing. Ed25519 retains strict
-  verification and assembles its required contiguous message.
+- ECDSA verification, including Brainpool, hashes borrowed fragments through
+  RustCrypto's multipart interface. HMAC uses the same borrowed framing.
+  Strict Ed25519 and Ed448 assemble contiguous messages only when required.
 - The upstream X.509 decoder owns its decoded certificate fields. Issuer public
   points go directly from SPKI to the cryptographic verification key. Prepared
   signing operations retain that key rather than rebuilding a COSE key.
@@ -95,11 +132,13 @@ The `certificate` module owns ISO profile rules. The application owns root
 selection, certificate signatures, path validity, current time and revocation.
 Link-profile validation takes authenticated old-root and corresponding new-root
 evidence; name equality alone is not proof that a certificate is self-signed.
-No tenant, account, session, storage or HTTP types enter the library.
+No tenant, account, application-session, storage or HTTP types enter the library.
 
 `verify_presentation` selects DeviceSignature and verifies every document
 atomically. Callers set a document limit appropriate to their presentation
-profile. DeviceMAC/HKDF primitives accept an externally established session key.
+profile. `ReaderSession` explicitly permits signature or MAC and selects the
+issuer-authenticated MAC peer. Low-level DeviceMAC/HKDF primitives remain
+available with their externally established-key contract.
 
 See the [protocol matrix](protocol-matrix.md) for requirements and regression
 tests, and [migration guide](migration.md) for the 0.3 API changes.

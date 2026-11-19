@@ -5,6 +5,8 @@ use crate::model::{CoseHeaderRef, CoseLabelRef};
 use coset::{RegisteredLabelWithPrivate, iana};
 
 pub mod key;
+#[cfg(feature = "reader-crypto")]
+pub(crate) mod reader_crypto;
 mod structure;
 mod verify;
 

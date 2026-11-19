@@ -22,6 +22,10 @@ fuzz_target!(|input: &[u8]| {
         let _ = nazo_mdoc::cbor::data_item::encode_cbor_canonical(&value);
     }
     let _ = nazo_mdoc::session::SessionTranscript::from_cbor(input);
+    let _ = nazo_mdoc::reader::ResponseEnvelope::from_bytes(input);
+    if let Ok(items) = nazo_mdoc::reader::ItemsRequest::from_bytes(input) {
+        let _ = nazo_mdoc::reader::encode_device_request(&[items.unsigned()]);
+    }
     if let Ok(response) = nazo_mdoc::parse_borrowed(input) {
         for document in &response.documents {
             let auth = &document.issuer_signed.issuer_auth;
