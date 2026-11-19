@@ -295,11 +295,8 @@ fn ed448_rejects_noncanonical_aliases_before_signature_verification() {
 
         let mut invalid_signature = signature.clone();
         invalid_signature[..57].copy_from_slice(&bad_y);
-        assert!(!verify_cose_signature(
-            &message,
-            &invalid_signature,
-            &key,
-            algorithms::EDDSA
-        ).unwrap());
+        assert!(
+            !verify_cose_signature(&message, &invalid_signature, &key, algorithms::EDDSA).unwrap()
+        );
     }
 }

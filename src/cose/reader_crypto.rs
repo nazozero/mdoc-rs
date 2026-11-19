@@ -38,18 +38,24 @@ impl ExtendedVerificationKey {
     pub(crate) fn verify(&self, parts: &[&[u8]], signature: &[u8]) -> Result<bool, MdocError> {
         match self {
             Self::Brainpool256(key) => {
-                let signature = bp256::r1::ecdsa::Signature::from_slice(signature)
-                    .map_err(|_| MdocError::Signature("Brainpool P256 signature length or scalar".into()))?;
+                let signature =
+                    bp256::r1::ecdsa::Signature::from_slice(signature).map_err(|_| {
+                        MdocError::Signature("Brainpool P256 signature length or scalar".into())
+                    })?;
                 Ok(key.multipart_verify(parts, &signature).is_ok())
             }
             Self::Brainpool384(key) => {
-                let signature = bp384::r1::ecdsa::Signature::from_slice(signature)
-                    .map_err(|_| MdocError::Signature("Brainpool P384 signature length or scalar".into()))?;
+                let signature =
+                    bp384::r1::ecdsa::Signature::from_slice(signature).map_err(|_| {
+                        MdocError::Signature("Brainpool P384 signature length or scalar".into())
+                    })?;
                 Ok(key.multipart_verify(parts, &signature).is_ok())
             }
             Self::Ed448(key) => {
                 if signature.len() != 114 {
-                    return Err(MdocError::Signature("Ed448 signature must be 114 bytes".into()));
+                    return Err(MdocError::Signature(
+                        "Ed448 signature must be 114 bytes".into(),
+                    ));
                 }
                 let message;
                 let bytes = if let [part] = parts {
