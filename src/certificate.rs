@@ -535,7 +535,7 @@ impl PreparedDocumentSigner {
     }
 
     pub(crate) fn matches(&self, der: &[u8], algorithm: i64) -> bool {
-        self.algorithm == algorithm && self.certificate_der == der
+        self.algorithm == algorithm && self.certificate_der.as_slice() == der
     }
 
     pub(crate) fn check_mdl_issuer_value(
