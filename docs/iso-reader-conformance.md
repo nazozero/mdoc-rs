@@ -125,7 +125,7 @@ attached to the implementing pull request and its commit-specific CI runs.
 | S-08 | §9.1.3.4; M | Issuer/wallet key owner: one device authentication key has one lifetime use, signature or MAC. Core: apply the same MSO authorization rules to either mechanism. | Key purpose/provisioning history is external; `verifier_test::nonempty_device_data_requires_key_authorizations` covers authorization enforcement. |
 | S-09 | §§6.3.3, 9.1.4; O, conditional requirements when selected | Core reader signing: immutable ReaderAuthenticationBytes, detached COSE Sign1, protected alg, unprotected nonempty x5chain. Host owns reader identity/certificate trust. | `reader_requests::independently_generated_reader_authentication_vector`; `reader_signature_binds_exact_request_transcript_and_certificate`; `external_completion_rejects_wrong_key_input_der_and_algorithm`. The DS checker is not applied to reader certificates. |
 | S-10 | §9.1.5.1; M | Core + engagement adapter: exact DeviceEngagementBytes, EReaderKeyBytes, QR null handover or exact NFC Select/Request messages. | `session_reader::handover_roles_and_bounded_transcript_are_enforced`; `replay_order_and_wrong_session_fail_closed`. Acquisition/channel identity remains external; SessionTranscript and its Tag 24 wrapper are distinct bytes. |
-| S-11 | §9.1.5.2/Table 22; M | Core + key backend: every listed curve in its defined purpose. Reader ephemeral EC2 key is uncompressed; device ephemeral EC2 key permits compressed form. | `session_agreement_curves::all_table22_agreement_curves_match_independent_full_session_vectors` covers all nine ECDH curves using a test OpenSSL private-key adapter and independent complete session fixtures. Deployed adapters still need their own operation/lifecycle evidence. |
+| S-11 | §9.1.5.2/Table 22; M | Core + key backend: every listed curve in its defined purpose. Reader ephemeral EC2 key is uncompressed; device ephemeral EC2 key permits compressed form. | `session_agreement_curves::supported_table22_agreement_curves_match_independent_full_session_vectors` checks seven supported ECDH curves with an external OpenSSL CLI test oracle and independent complete session fixtures; Brainpool P320/P512 are explicitly rejected. Deployed adapters still need their own operation/lifecycle evidence. |
 | S-12 | §§9.2.1–2, 9.3.2; C, ISO server retrieval selected | Host: TLS/JWS algorithms, certificate roles, JWT inspection/time/issuer/token binding. | Outside this crate's selected device-retrieval and OpenID Final contracts; no conformance evidence. |
 | X-01 | §9.3.3; M | Host: RFC 5280 path signatures/constraints/current time, authenticated available anchors and certificate revocation access. | `PendingTrustDocumentRef` requires host completion. NazoAuth integration tests are listed below. |
 | X-02 | Annex B.1.1–4; M for corresponding issuer certificate role | Core `certificate-profile`: DER/DS/IACA/link profiles, authenticated issuer bindings, transmitted-root exclusion. Host: anchor/path evidence and signatures. | `certificate_profiles` signed positive/negative fixtures; `check_iaca_link_profile` requires both old and corresponding new-root evidence. |
@@ -144,12 +144,12 @@ reader algorithm optional in the standard.
 | P-256 | ES256, default RustCrypto | ECDH; RustCrypto point validation |
 | P-384 | ES384, default RustCrypto | ECDH; RustCrypto point validation |
 | P-521 | ES512, default RustCrypto | ECDH; RustCrypto point validation |
-| brainpoolP256r1 | ES256, native `reader-crypto` | ECDH; native `reader-crypto` point validation |
-| brainpoolP320r1 | ES384, native `reader-crypto` | ECDH; native `reader-crypto` point validation |
-| brainpoolP384r1 | ES384, native `reader-crypto` | ECDH; native `reader-crypto` point validation |
-| brainpoolP512r1 | ES512, native `reader-crypto` | ECDH; native `reader-crypto` point validation |
+| brainpoolP256r1 | ES256, portable `reader-crypto` | ECDH; portable point validation |
+| brainpoolP320r1 | Unsupported, implementation required | Unsupported, implementation required |
+| brainpoolP384r1 | ES384, portable `reader-crypto` | ECDH; portable point validation |
+| brainpoolP512r1 | Unsupported, implementation required | Unsupported, implementation required |
 | Ed25519 | EdDSA, default strict RustCrypto | Not an ECDH curve |
-| Ed448 | EdDSA, native `reader-crypto`, full-signature path | Not an ECDH curve |
+| Ed448 | EdDSA, portable `reader-crypto` with standalone point validation | Not an ECDH curve |
 | X25519 | Not a signature curve | RFC 7748 public bytes; agreement output width/all-zero check |
 | X448 | Not a signature curve | RFC 7748 public bytes; agreement output width/all-zero check |
 
@@ -160,26 +160,27 @@ and the RFC 8152 compressed `y` boolean; EReader EC2 remains uncompressed.
 
 ### Added backend and operation boundaries
 
-The optional `reader-crypto` feature selects the maintained `openssl` crate
-0.10.82 (Apache-2.0) on native targets. It extends the existing COSE, issuer SPKI
-and holder signature paths with Brainpool P256r1/P320r1/P384r1/P512r1 and Ed448.
-The default P-256/P-384/P-521/Ed25519 path stays on RustCrypto. On WASM the native
-backend is absent and its extra curves return an unsupported-operation error.
+The optional `reader-crypto` feature uses RustCrypto `bp256`/`bp384` and
+`ed448-goldilocks`. These algorithms work on native and WASM targets without
+OpenSSL. Ed448 public-point decoding rejects invalid, identity, and torsion
+points before standalone issuance or issuer-only verification.
 
-Ed448 full-signature verification and standalone public-key validation are
-different operations. OpenSSL's raw-key import/public check does not establish
-the point-validation contract required by the standalone device-key API.
-Ed448 device keys therefore remain unsupported by standalone issuance or
-issuer-only validation where no holder signature is checked. Full reader
-verification must use the signature-checked path. The protocol matrix must not
-mark this as complete Ed448 support for every public API.
+`aws-lc` selects `aws-lc-rs` 1.19 for reader-session AES-256-GCM on supported
+native targets. The default and WASM session implementation uses RustCrypto
+`aes-gcm`. Both decrypt in place with identical authenticated nonce, counter
+and byte contracts. The external `ReaderKeyAgreement` provider continues to
+own ECDH operations and ephemeral private-key lifetime.
 
-The external ECDH interface covers the Table 22 key-agreement roles, including
-X25519/X448. The core validates role/encoding, EC points through the maintained
-backend, matching curves and agreement result width/nonzero output. The private
-key adapter implements the actual ECDH and its lifecycle; each claimed adapter
-needs independent operation evidence. Brainpool point validation requires the
-native feature. No elliptic-curve arithmetic is implemented in this project.
+Brainpool P320r1 and P512r1 are currently rejected for signature and ECDH
+roles. Both remain mandatory for the selected complete-reader target.
+Known alternative implementations have not met this repository's production
+security and licensing criteria; complete-reader conformance remains open.
+
+The core validates NIST and supported Brainpool compressed/full EC points
+and X25519/X448 input lengths; the external adapter supplies ECDH and the
+result-length/all-zero checks are enforced here. No private-key arithmetic
+is implemented in this project. OpenSSL is used solely by independently
+generated offline fixtures and a Linux test oracle, not as a crate dependency.
 
 The existing signature-key profile still enforces optional `alg`, `key_ops` and
 `base_iv` restrictions. ISO §9.1.5.2 recommends ignoring optional key parameters;
@@ -192,14 +193,13 @@ common COSE metadata syntax/profile checks before dispatch.
 `tests/session_agreement_curves.rs` and `tests/reader_crypto.rs` map the added
 operations. Reader/session fixtures use independent Python framing, Python
 cryptography/OpenSSL and standard-library HKDF/HMAC. The
-[native fixture inventory](../tests/vectors/reader_crypto/README.md) records
+[cryptography fixture inventory](../tests/vectors/reader_crypto/README.md) records
 RFC 8032 Ed448 vectors, the selected Wycheproof revision/cases and independent
 full Brainpool/Ed448 presentations. Fixture independence and mutation coverage
 do not substitute for official test-method execution.
 
-Dependency advisory results, linked OpenSSL version and backend artifact costs
-belong in the exact build evidence. A system OpenSSL library is a runtime/build
-dependency that must be patched by its operator.
+Dependency advisory results, selected backend versions and native/WASM artifact
+costs belong in the exact tested revision's build evidence.
 
 ## Application integration
 

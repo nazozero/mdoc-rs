@@ -22,10 +22,11 @@ performance measurements are recorded separately for each revision.
 | [RFC 6979 A.2.6](https://www.rfc-editor.org/rfc/rfc6979.html#appendix-A.2.6), [RFC 8032 §§7.1, 7.4](https://www.rfc-editor.org/rfc/rfc8032.html#section-7) | Independent P-384, Ed25519 and Ed448 signature vectors |
 
 Default signature verification supports P-256, P-384, P-521 and Ed25519.
-`reader-crypto` adds all four ISO Brainpool curves and Ed448 on native targets.
-Full Ed448 holder verification is supported; standalone Ed448 device-key
-validation without a holder signature remains unsupported. WASM builds reject
-the additional native curves.
+The portable `reader-crypto` feature adds Brainpool P256/P384 and Ed448,
+including standalone public-point validation on WASM. Brainpool P320/P512
+remain unsupported; the complete ISO reader algorithm target is not met.
+On native targets `aws-lc` selects AWS-LC session AES-GCM without changing
+the signature verifier or external ECDH contracts.
 
 `verify_presentation*` selects DeviceSignature. The optional `reader-session`
 path verifies either DeviceSignature or session-bound DeviceMAC through the
@@ -102,7 +103,7 @@ tests below are relative to this repository.
 ## Device-retrieval reader
 
 The request/error APIs are available without features. Session operations require
-`reader-session`; native extended curves additionally require `reader-crypto`.
+`reader-session`; portable extended curves additionally require `reader-crypto`.
 These features select implementation cost, not the standard's mandatory scope.
 
 | ID | ISO 2021 contract | Implementation | Regression contract |
@@ -110,14 +111,14 @@ These features select implementation cost, not the standard's mandatory scope.
 | READER-01 | §8.3.2.1.2.1 and §7.2.5: immutable Tag 24 ItemsRequest, typed retention intent, nonempty requested fields, requestInfo preservation, bounded DeviceRequest encoding and cumulative age limit. | `src/reader.rs`: `ItemsRequest`, `encode_device_request`; `ReaderSession` | `reader_requests::unsigned_requests_retain_exact_items_and_unknown_request_info`; `request_schema_rejects_ambiguous_or_empty_requested_elements`; `age_attestation_limit_applies_to_the_complete_request`; `session_reader::age_limit_spans_requests_and_failed_send_does_not_consume_budget` |
 | READER-02 | §9.1.4: optional reader authentication binds exact request/transcript bytes, protected algorithm and unprotected x5chain; external completion verifies the signature. | `prepare_reader_authentication`; `PreparedReaderAuthentication::finish` | `reader_requests::independently_generated_reader_authentication_vector`; `reader_signature_binds_exact_request_transcript_and_certificate`; `external_completion_rejects_wrong_key_input_der_and_algorithm` |
 | READER-03 | §§8.3.2.1.2.2–3: status-only, document and element errors retain raw untrusted fields; no partial credential admission. | `ResponseEnvelope`; `session::reader::ReaderResponse` | `reader_requests::status_only_and_document_errors_are_available_without_claims`; `mixed_document_errors_never_relax_atomic_presentation_verification`; `response_errors_reject_invalid_shapes_duplicates_and_trailing_bytes`; `session_reader::status_and_mixed_error_responses_never_contain_authenticated_claims` |
-| READER-04 | §§8.2.1.1, 9.1.1, 9.1.5: original engagement/handover/key bytes; separate agreement-key roles; matching curves, checked points and fixed-width nonzero ECDH results. Reader EC2 is uncompressed; device EC2 permits compressed encoding. | `ReaderSession::new`; `AgreementPublicKey`; external `ReaderKeyAgreement` | `session_reader::agreement_roles_optional_parameters_and_invalid_points_are_checked_once`; `handover_roles_and_bounded_transcript_are_enforced`; `composed_transcript_and_encrypted_request_share_outer_resource_limits`; `session_agreement_curves::all_table22_agreement_curves_match_independent_full_session_vectors` |
+| READER-04 | §§8.2.1.1, 9.1.1, 9.1.5: original engagement/handover/key bytes; separate agreement-key roles; matching curves, checked points and fixed-width nonzero ECDH results. Reader EC2 is uncompressed; device EC2 permits compressed encoding. | `ReaderSession::new`; `AgreementPublicKey`; external `ReaderKeyAgreement` | `session_reader::agreement_roles_optional_parameters_and_invalid_points_are_checked_once`; `handover_roles_and_bounded_transcript_are_enforced`; `composed_transcript_and_encrypted_request_share_outer_resource_limits`; `session_agreement_curves::supported_table22_agreement_curves_match_independent_full_session_vectors` |
 | READER-05 | §§9.1.3.4–5: HMAC-256/256 uses the issuer-authenticated SDevice key and this session's reader private key; detached payload, original protected bytes and the same disclosure/authorization checks as signatures. | `verify_device_mac`; shared `verify_parsed_presentation` | `session_reader::independent_full_session_mac_signature_and_directional_keys`; `authentication_failures_close_and_release_without_partial_claims` |
 | READER-06 | §9.1.1: HKDF contexts, AES-256-GCM, distinct directional counters from 1, ordered request/response transitions, replay rejection and terminal key release. | `ReaderSession`; `SessionStatus` | `session_reader::independent_full_session_mac_signature_and_directional_keys`; `replay_order_and_wrong_session_fail_closed`; `terminal_data_is_authenticated_before_external_key_destruction`; `parallel_sessions_keep_counters_and_authentication_independent`; unit `directional_counter_exhaustion_terminates_without_wrap_or_reuse` |
-| READER-07 | §§9.1.2.4, 9.1.3.6, 9.1.5.2: native Brainpool/Ed448 signature combinations across COSE, SPKI, borrowed and owned verification. | `src/cose/openssl_backend.rs`; existing `VerificationKey` | `reader_crypto::independent_extended_curve_presentations_follow_the_compiled_capability`; `extended_curve_presentations_reject_changed_transcripts_signatures_and_claims`; `a_failed_extended_document_rejects_the_entire_response`; COSE units `independent_wycheproof_cases_cover_owned_borrowed_and_spki_paths`, `rfc8032_ed448_blank_and_one_octet_verify_without_prehashing`, `compressed_brainpool_keys_verify_and_reject_changed_parity_and_invalid_x`, `ed448_rejects_identity_forgery_and_noncanonical_points` |
+| READER-07 | §§9.1.2.4, 9.1.3.6, 9.1.5.2: portable Brainpool P256/P384 and Ed448 across COSE, SPKI, borrowed and owned verification; P320/P512 remain unsupported. | `src/cose/reader_crypto.rs`; existing `VerificationKey` | `reader_crypto::independent_extended_curve_presentations_follow_the_compiled_capability`; `extended_curve_presentations_reject_changed_transcripts_signatures_and_claims`; `a_failed_extended_document_rejects_the_entire_response`; COSE units `independent_wycheproof_cases_cover_owned_borrowed_and_spki_paths`, `rfc8032_ed448_blank_and_one_octet_verify_without_prehashing`, `compressed_brainpool_keys_verify_and_reject_changed_parity_and_invalid_x`, `ed448_rejects_identity_forgery_and_noncanonical_points` |
 
 The frozen reader-authentication and session fixtures are generated independently
 using Python CBOR framing, Python cryptography and standard-library HKDF/HMAC.
-The [native cryptography corpus](../tests/vectors/reader_crypto/README.md)
+The [portable cryptography corpus](../tests/vectors/reader_crypto/README.md)
 records selected Wycheproof cases, RFC vectors, independent full presentations,
 source revisions, licenses and hashes. These fixtures support their specified
 protocol/algorithm cases; they are not the ISO/IEC TS 18013-6 conformance suite.
