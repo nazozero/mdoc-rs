@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::cbor::data_item;
 use crate::cbor::raw::{head_len, push_bytes, push_head, push_text};
+#[cfg(feature = "certificate-profile")]
+use crate::certificate::PreparedDocumentSigner;
 use crate::error::MdocError;
 use crate::model::document::{IssuerSigned, IssuerSignedDocument};
 use crate::model::issuer_auth::IssuerAuth;
@@ -140,6 +142,38 @@ impl DocumentBuilder {
         algorithm: CoseAlgorithm,
         certificate_chain: Vec<Vec<u8>>,
     ) -> Result<PreparedDocument, MdocError> {
+        #[cfg(feature = "certificate-profile")]
+        {
+            self.prepare_inner(algorithm, certificate_chain, None)
+        }
+        #[cfg(not(feature = "certificate-profile"))]
+        {
+            self.prepare_inner(algorithm, certificate_chain)
+        }
+    }
+
+    /// Prepare issuance with an Annex B Document Signer already validated for
+    /// this exact DER and algorithm. Other dynamic issuance checks remain here.
+    #[cfg(feature = "certificate-profile")]
+    pub fn prepare_with_signer(
+        self,
+        certificate_chain: Vec<Vec<u8>>,
+        signer: &PreparedDocumentSigner,
+    ) -> Result<PreparedDocument, MdocError> {
+        self.prepare_inner(
+            CoseAlgorithm::from_cose_id(signer.algorithm)
+                .expect("prepared signer has an admitted COSE algorithm"),
+            certificate_chain,
+            Some(signer),
+        )
+    }
+
+    fn prepare_inner(
+        self,
+        algorithm: CoseAlgorithm,
+        certificate_chain: Vec<Vec<u8>>,
+        #[cfg(feature = "certificate-profile")] signer: Option<&PreparedDocumentSigner>,
+    ) -> Result<PreparedDocument, MdocError> {
         let mut validity = self
             .validity_info
             .ok_or_else(|| MdocError::Issuance("missing validity info".to_string()))?;
@@ -181,14 +215,33 @@ impl DocumentBuilder {
         #[cfg(not(feature = "certificate-profile"))]
         let interval = crate::verifier::certificate_interval(&leaf)?;
         #[cfg(feature = "certificate-profile")]
-        let leaf = crate::certificate::parse_document_signer(&certificate_chain[0])?;
+        let leaf = if let Some(signer) = signer {
+            if !signer.matches(&certificate_chain[0], algorithm.cose_id()) {
+                return Err(MdocError::Certificate(
+                    "prepared Document Signer does not match x5chain leaf".into(),
+                ));
+            }
+            None
+        } else {
+            Some(crate::certificate::parse_document_signer(
+                &certificate_chain[0],
+            )?)
+        };
         #[cfg(feature = "certificate-profile")]
-        let issuer_key = crate::cose::VerificationKey::from_spki_ref(
-            crate::certificate::spki(&leaf)?,
-            algorithm.cose_id(),
-        )?;
+        let issuer_key = if let Some(signer) = signer {
+            signer.key.clone()
+        } else {
+            crate::cose::VerificationKey::from_spki_ref(
+                crate::certificate::spki(leaf.as_ref().expect("parsed DS"))?,
+                algorithm.cose_id(),
+            )?
+        };
         #[cfg(feature = "certificate-profile")]
-        let interval = crate::certificate::interval(&leaf)?;
+        let interval = if let Some(signer) = signer {
+            signer.validity
+        } else {
+            crate::certificate::interval(leaf.as_ref().expect("parsed DS"))?
+        };
         if validity.signed < interval.0 || validity.signed > interval.1 {
             return Err(MdocError::Validity(
                 "MSO signed time outside issuer certificate validity".into(),
@@ -224,11 +277,18 @@ impl DocumentBuilder {
                 )?;
                 #[cfg(feature = "certificate-profile")]
                 if mdl && matches!(elem_id.as_str(), "issuing_country" | "issuing_jurisdiction") {
-                    crate::certificate::check_mdl_issuer_attribute(
-                        &leaf,
-                        &elem_id,
-                        elem_value.as_text().expect("validated mDL text field"),
-                    )?;
+                    if let Some(signer) = signer {
+                        signer.check_mdl_issuer_value(
+                            &elem_id,
+                            elem_value.as_text().expect("validated mDL text field"),
+                        )?;
+                    } else {
+                        crate::certificate::check_mdl_issuer_attribute(
+                            leaf.as_ref().expect("parsed DS"),
+                            &elem_id,
+                            elem_value.as_text().expect("validated mDL text field"),
+                        )?;
+                    }
                 }
                 let item = IssuerSignedItem {
                     digest_id,
@@ -451,8 +511,10 @@ fn encode_mso(
     push_text(&mut out, digest_algorithm.name());
     debug_assert_eq!(out.len(), 2 + head_len(inner_len as u64) + inner_len);
 
-    let validated = crate::cbor::raw::Item::parse(&out)?;
     if status.is_some() {
+        // Only untrusted status values need the parsed/typed MSO status check.
+        // The status-free MSO is encoded from validated typed fields.
+        let validated = crate::cbor::raw::Item::parse(&out)?;
         // Status is the first field in this deterministic schema. Its borrowed
         // parser shares exactly the same rules as received credentials.
         let (_, status) = validated

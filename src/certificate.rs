@@ -463,20 +463,85 @@ pub fn check_mdl_issuer_attribute(
     name: &str,
     value: &str,
 ) -> Result<(), CertificateProfileError> {
-    let expected = match name {
-        "issuing_country" => Some(subject_country(certificate)?),
-        "issuing_jurisdiction" => {
-            if value.as_bytes().get(..2) != Some(subject_country(certificate)?.as_bytes()) {
-                return Err(CertificateProfileError("mDL jurisdiction country binding"));
-            }
-            subject_state(certificate)?
+    match name {
+        "issuing_country" => {
+            check_mdl_issuer_value(subject_country(certificate)?, None, name, value)
         }
-        _ => return Ok(()),
-    };
-    if expected.is_some_and(|expected| expected != value) {
-        return Err(CertificateProfileError("mDL issuer attribute binding"));
+        "issuing_jurisdiction" => check_mdl_issuer_value(
+            subject_country(certificate)?,
+            subject_state(certificate)?,
+            name,
+            value,
+        ),
+        _ => Ok(()),
     }
-    Ok(())
+}
+
+fn check_mdl_issuer_value(
+    country: &str,
+    state: Option<&str>,
+    name: &str,
+    value: &str,
+) -> Result<(), CertificateProfileError> {
+    match name {
+        "issuing_country" if country != value => {
+            Err(CertificateProfileError("mDL issuer attribute binding"))
+        }
+        "issuing_jurisdiction" if value.as_bytes().get(..2) != Some(country.as_bytes()) => {
+            Err(CertificateProfileError("mDL jurisdiction country binding"))
+        }
+        "issuing_jurisdiction" if state.is_some_and(|state| state != value) => {
+            Err(CertificateProfileError("mDL issuer attribute binding"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Static, protocol-checked DS evidence reusable for the exact same certificate.
+///
+/// This type authenticates **neither** the issuer path nor its trust anchor.
+/// Host policy still verifies X.509 trust, current validity and revocation.
+/// Its immutable key and Annex B checks can be reused across many credentials.
+#[derive(Debug)]
+pub struct PreparedDocumentSigner {
+    certificate_der: Vec<u8>,
+    pub(crate) algorithm: i64,
+    pub(crate) key: crate::cose::VerificationKey,
+    pub(crate) validity: (crate::Timestamp, crate::Timestamp),
+    country: String,
+    state: Option<String>,
+}
+
+impl PreparedDocumentSigner {
+    /// Validate a Document Signer certificate and its COSE signing algorithm once.
+    pub fn new(
+        der: &[u8],
+        algorithm: crate::model::types::CoseAlgorithm,
+    ) -> Result<Self, crate::MdocError> {
+        let certificate = parse_document_signer(der)?;
+        let key =
+            crate::cose::VerificationKey::from_spki_ref(spki(&certificate)?, algorithm.cose_id())?;
+        Ok(Self {
+            certificate_der: der.to_vec(),
+            algorithm: algorithm.cose_id(),
+            key,
+            validity: interval(&certificate)?,
+            country: subject_country(&certificate)?.to_owned(),
+            state: subject_state(&certificate)?.map(str::to_owned),
+        })
+    }
+
+    pub(crate) fn matches(&self, der: &[u8], algorithm: i64) -> bool {
+        self.algorithm == algorithm && self.certificate_der.as_slice() == der
+    }
+
+    pub(crate) fn check_mdl_issuer_value(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> Result<(), CertificateProfileError> {
+        check_mdl_issuer_value(&self.country, self.state.as_deref(), name, value)
+    }
 }
 
 pub(crate) fn parse_document_signer(der: &[u8]) -> Result<X509Certificate<'_>, crate::MdocError> {

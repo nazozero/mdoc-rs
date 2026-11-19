@@ -115,6 +115,37 @@ pub fn verify_presentation_borrowed<'a>(
     transcript: &SessionTranscript<'_>,
     options: &VerificationOptions,
 ) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
+    #[cfg(feature = "certificate-profile")]
+    {
+        verify_presentation_borrowed_inner(encoded, transcript, options, None)
+    }
+    #[cfg(not(feature = "certificate-profile"))]
+    {
+        verify_presentation_borrowed_inner(encoded, transcript, options)
+    }
+}
+
+/// Reuse static DS profile/key validation only if the received leaf is byte-for-byte
+/// identical to the prevalidated signer. Issuer signatures, holder proofs and
+/// current certificate trust/revocation are still checked every time.
+#[cfg(feature = "certificate-profile")]
+pub fn verify_presentation_borrowed_with_signer<'a>(
+    encoded: &'a [u8],
+    transcript: &SessionTranscript<'_>,
+    options: &VerificationOptions,
+    signer: Option<&crate::certificate::PreparedDocumentSigner>,
+) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
+    verify_presentation_borrowed_inner(encoded, transcript, options, signer)
+}
+
+fn verify_presentation_borrowed_inner<'a>(
+    encoded: &'a [u8],
+    transcript: &SessionTranscript<'_>,
+    options: &VerificationOptions,
+    #[cfg(feature = "certificate-profile")] signer: Option<
+        &crate::certificate::PreparedDocumentSigner,
+    >,
+) -> Result<Vec<PendingTrustDocumentRef<'a>>, MdocError> {
     let response = crate::parser::parse_borrowed_with_limits(
         encoded,
         Limits::default(),
@@ -142,7 +173,11 @@ pub fn verify_presentation_borrowed<'a>(
             interval: certificate_interval,
             #[cfg(feature = "certificate-profile")]
             leaf_certificate,
-        } = authenticate_issuer(&document.issuer_signed.issuer_auth)?;
+        } = authenticate_issuer(
+            &document.issuer_signed.issuer_auth,
+            #[cfg(feature = "certificate-profile")]
+            signer,
+        )?;
         for (namespace, elements) in &device.name_spaces {
             for name in elements.keys() {
                 crate::mdl::check_device_element(document.doc_type, namespace, name)?;
@@ -277,7 +312,11 @@ pub fn verify_issued_borrowed<'a>(
         interval: certificate_interval,
         #[cfg(feature = "certificate-profile")]
         leaf_certificate,
-    } = authenticate_issuer(&issuer_signed.issuer_auth)?;
+    } = authenticate_issuer(
+        &issuer_signed.issuer_auth,
+        #[cfg(feature = "certificate-profile")]
+        None,
+    )?;
     if mso.doc_type != expected_doc_type {
         return Err(MdocError::Mso(
             "docType differs from authenticated MSO".into(),
@@ -325,7 +364,12 @@ pub(crate) fn certificate_interval(
     Ok((convert(validity.not_before)?, convert(validity.not_after)?))
 }
 
-fn authenticate_issuer<'a>(auth: &IssuerAuthRef<'a>) -> Result<IssuerEvidence<'a>, MdocError> {
+fn authenticate_issuer<'a>(
+    auth: &IssuerAuthRef<'a>,
+    #[cfg(feature = "certificate-profile")] signer: Option<
+        &crate::certificate::PreparedDocumentSigner,
+    >,
+) -> Result<IssuerEvidence<'a>, MdocError> {
     let sign1 = &auth.cose_sign1;
     let algorithm =
         crate::cose::validate_borrowed_headers(&sign1.protected_header, &sign1.unprotected)?;
@@ -337,15 +381,29 @@ fn authenticate_issuer<'a>(auth: &IssuerAuthRef<'a>) -> Result<IssuerEvidence<'a
     let leaf = x509_cert::Certificate::from_der(certificates[0])
         .map_err(|error| MdocError::Certificate(error.to_string()))?;
     #[cfg(feature = "certificate-profile")]
-    let leaf = crate::certificate::parse_document_signer(certificates[0])?;
+    let reused = signer.filter(|signer| signer.matches(certificates[0], algorithm));
+    #[cfg(feature = "certificate-profile")]
+    let leaf = if reused.is_some() {
+        let (rest, leaf) = x509_parser::parse_x509_certificate(certificates[0])
+            .map_err(|error| MdocError::Certificate(error.to_string()))?;
+        if !rest.is_empty() {
+            return Err(MdocError::Certificate("trailing certificate bytes".into()));
+        }
+        leaf
+    } else {
+        crate::certificate::parse_document_signer(certificates[0])?
+    };
     #[cfg(not(feature = "certificate-profile"))]
     let key = crate::cose::VerificationKey::from_spki(
         leaf.tbs_certificate().subject_public_key_info(),
         algorithm,
     )?;
     #[cfg(feature = "certificate-profile")]
-    let key =
-        crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?;
+    let key = if let Some(signer) = reused {
+        signer.key.clone()
+    } else {
+        crate::cose::VerificationKey::from_spki_ref(crate::certificate::spki(&leaf)?, algorithm)?
+    };
     let framing = crate::cose::AuthenticationStructure::sign1(sign1.protected.len(), payload.len());
     if !key.verify(&framing.parts(sign1.protected, payload), sign1.signature)? {
         return Err(MdocError::Signature("issuerAuth signature mismatch".into()));
