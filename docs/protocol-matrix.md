@@ -8,7 +8,7 @@ performance measurements are recorded separately for each revision.
 
 | Specification | Library scope |
 | --- | --- |
-| [ISO/IEC 18013-5:2021](https://www.iso.org/standard/69084.html) | DeviceResponse, IssuerSigned, MSO, disclosure digests and device authentication. Selected clauses were reviewed using the [public IBR copy](https://law.resource.org/pub/us/cfr/ibr/inc/iec/iec.18013-5.2021.pdf). |
+| [ISO/IEC 18013-5:2021](https://www.iso.org/standard/69084.html) | Device engagement/session framing, requests, responses, issuer/reader/device authentication, MSO and disclosure digests. Protocol clauses were reviewed using the [public IBR copy](https://law.resource.org/pub/us/cfr/ibr/inc/iec/iec.18013-5.2021.pdf). |
 | [OpenID4VCI 1.0 Final, A.2](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html) | IssuerSigned preparation and encoding |
 | [OpenID4VP 1.0 Final, B.2](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html) | Redirect and DC API SessionTranscript handovers |
 | [OpenID4VC HAIP 1.0 Final, §5.3.1](https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0-final.html) | Caller-selected limit of one mdoc per DeviceResponse |
@@ -19,15 +19,22 @@ performance measurements are recorded separately for each revision.
 | [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339.html) | Timestamp representation and leap seconds |
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986.html) | Status-reference URI syntax |
 | [Token Status List draft-21, §6.3](https://www.ietf.org/archive/id/draft-ietf-oauth-status-list-21.html) | Selected MSO status extension revision |
-| [RFC 6979 A.2.6](https://www.rfc-editor.org/rfc/rfc6979.html#appendix-A.2.6), [RFC 8032 §7.1](https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1) | Independent P-384 and Ed25519 signature vectors |
+| [RFC 6979 A.2.6](https://www.rfc-editor.org/rfc/rfc6979.html#appendix-A.2.6), [RFC 8032 §§7.1, 7.4](https://www.rfc-editor.org/rfc/rfc8032.html#section-7) | Independent P-384, Ed25519 and Ed448 signature vectors |
 
-The signature profile supports P-256, P-384, P-521 and Ed25519.
-`verify_presentation` selects DeviceSignature. DeviceMAC and EMacKey derivation
-are separate primitives for applications that establish the session key.
+Default signature verification supports P-256, P-384, P-521 and Ed25519.
+`reader-crypto` adds all four ISO Brainpool curves and Ed448 on native targets.
+Full Ed448 holder verification is supported; standalone Ed448 device-key
+validation without a holder signature remains unsupported. WASM builds reject
+the additional native curves.
 
-A complete ISO reader also requires the Brainpool/Ed448 combinations in
-§9.1.2.4 and both MAC and signature authentication in §9.1.3.4. These capabilities,
-reader authentication and proximity engagement are tracked in
+`verify_presentation*` selects DeviceSignature. The optional `reader-session`
+path verifies either DeviceSignature or session-bound DeviceMAC through the
+same issuer, disclosure and authorization checks. The private ECDH operation
+belongs to a `ReaderKeyAgreement` provider; transport adapters remain external.
+Low-level DeviceMAC/HKDF functions retain their externally established-key
+contract. The [edition-specific inventory](iso-reader-conformance.md) records
+mandatory reader roles separately from Cargo features and identifies the
+remaining physical-reader, trust and official-test evidence for
 [issue #3](https://github.com/nazozero/nazo-mdoc/issues/3).
 
 [ISO/IEC TS 18013-7:2025](https://www.iso.org/standard/91154.html) and the
@@ -54,7 +61,7 @@ tests below are relative to this repository.
 | COSE-01 | RFC 9052 §§3, 3.1 plus the selected header profile | Reject duplicate labels, unprocessed or misplaced critical semantics, cross-bucket duplicates and headers outside the selected alg/crit/kid/x5chain profile. | `src/cose/mod.rs`; `src/parser.rs` | `parser_security::empty_security_headers_cannot_disappear_during_cose_decoding`; `duplicate_header_labels_are_rejected_across_buckets_even_for_empty_kid`; `unknown_text_private_and_unsigned_header_labels_fail_closed`; unit `rejects_private_use_critical_header`, `rejects_critical_header_from_unprotected_bucket`, `rejects_critical_alg_when_alg_header_is_absent`, `serialized_empty_critical_array_is_rejected_during_cose_parse`; `verification_boundaries::parsed_issuer_and_holder_headers_enforce_critical_semantics` |
 | COSE-02 | RFC 9052 §§4.2, 4.4, 9; required | Sig_structure uses original protected bytes/payload and empty external AAD; detached mode is explicit. | `src/cose/structure.rs`; `src/cose/verify.rs`; `src/device_auth.rs` | `interop_test::annex_d_original_bytes_digests_and_issuer_signature`; `response_external::external_holder_signs_sig_structure_and_finishes_a_detached_proof`; `encoder_preserves_original_protected_header_bytes`; `verifier_test::embedded_device_payload_is_rejected`; units `signed_protected_bytes_must_match_decoded_header_fields`; `inputs_match_independent_coset_encoding_at_length_boundaries`; `received_empty_protected_bytes_are_retained` |
 | COSE-03 | RFC 9053 §§2, 7; required | Bind key type, curve, algorithm and operations; reject invalid points, private material and unsupported combinations. Fixed-width ECDSA R\|\|S. | `src/cose/key.rs`; `src/cose/verify.rs` | COSE-06 substitution tests; `roundtrip_test::device_key_must_be_public_complete_and_on_a_supported_curve`; `iso_boundaries::device_verification_key_requires_verification_use_and_no_base_iv`; unit `der_encoded_es256_signature_is_rejected`, `raw_rs_length_is_required`, `ec2_verification_keys_require_both_coordinates_before_signing_preparation`, `okp_verification_keys_require_x_but_reject_y` |
-| COSE-04 | RFC 9052 §§6.2–6.3; optional core API | Mac0 requires the supported algorithm, empty AAD and caller-authorized session key. Detached payload and original protected bytes are authenticated. Presentation verification selects DeviceSignature. | `src/device_auth.rs` | Four algorithm unit tests plus `tests/cose_mac_boundaries.rs`: `python_hmac_sha256_vector_verifies_detached_mac0`, `device_mac_rejects_modified_and_wrong_length_tags`, `device_mac_requires_the_supplied_external_key`, `device_mac_authenticates_the_complete_original_payload`, `device_mac_requires_empty_external_aad`, `device_mac_rejects_embedded_payloads`, `device_mac_authenticates_original_protected_header_bytes`, `device_mac_rejects_protected_header_metadata_mismatches`, `device_mac_rejects_unsupported_or_unprotected_critical_headers`. Fixed tags use Python standard-library HMAC and manually encoded MAC_structure. |
+| COSE-04 | RFC 9052 §§6.2–6.3; optional primitive API | Mac0 requires the supported algorithm, empty AAD and caller-authorized key. Detached payload and original protected bytes are authenticated. The session-bound reader contract is READER-05 below. | `src/device_auth.rs` | Four algorithm unit tests plus `tests/cose_mac_boundaries.rs`: `python_hmac_sha256_vector_verifies_detached_mac0`, `device_mac_rejects_modified_and_wrong_length_tags`, `device_mac_requires_the_supplied_external_key`, `device_mac_authenticates_the_complete_original_payload`, `device_mac_requires_empty_external_aad`, `device_mac_rejects_embedded_payloads`, `device_mac_authenticates_original_protected_header_bytes`, `device_mac_rejects_protected_header_metadata_mismatches`, `device_mac_rejects_unsupported_or_unprotected_critical_headers`. Fixed tags use Python standard-library HMAC and manually encoded MAC_structure. |
 | COSE-05 | Original protected-header evidence; required | Reject malformed/nonminimal/trailing protected CBOR and disagreement with the decoded header. Empty protected bytes may decode but do not authenticate an algorithm. | `src/cose/mod.rs`; `src/parser.rs` | `parser_security::protected_headers_reject_duplicate_nonminimal_or_trailing_cbor`; `empty_protected_bstr_is_decodable_but_does_not_claim_authentication`; `a_single_nonempty_kid_is_accepted_and_an_empty_kid_fails_closed`; `verification_boundaries::public_device_verification_still_checks_original_header_binding` |
 | COSE-06 | RFC 6979 A.2.6; RFC 8032 §7.1; independent primitive vectors | Fixed P-384/SHA-384 `sample`/`test` and Ed25519 TEST 1 exercise verification without using the library signer to derive expectations. | `src/cose/verify.rs`; `src/cose/key.rs` | All nine `tests/cose_vectors.rs` tests: `rfc6979_p384_sha384_sample_and_test_verify`, `rfc6979_p384_rejects_modified_signature_and_message`, `rfc6979_p384_rejects_algorithm_substitution`, `rfc6979_p384_rejects_curve_and_key_type_substitution`, `rfc8032_ed25519_empty_message_verifies`, `rfc8032_ed25519_rejects_modified_signature_and_message`, `rfc8032_ed25519_rejects_algorithm_substitution`, `rfc8032_ed25519_rejects_curve_and_key_type_substitution`, `official_vectors_require_exact_cose_signature_lengths` |
 | COSE-07 | RFC 9052 §§3, 4.2, 6.2; required native field types | Construct Sign1/Mac0 from exactly four typed wire fields, retaining original protected bytes. Decode header values through the tag-preserving path; direct primitives apply the same contract to original_data. | `parser::parse_cose`; `cose::parse_header`; `validate_headers`; `validate_parsed_headers` | `tag_semantics::cose_alg_and_critical_labels_reject_bignums_in_every_wire_role`; `direct_sign1_verification_rejects_signed_bignum_header_types`; `direct_mac0_verification_rejects_authenticated_bignum_header_types`. Direct vectors authenticate the deliberately invalid header using independent valid signatures/MACs. |
@@ -91,6 +98,29 @@ tests below are relative to this repository.
 | ISSUE-02 | Profile contract; required | Validate issuance fields and status, then enforce duplicate-key and resource limits on the encoded Tag 24 MSO. | `src/builder.rs`; `parse_status_ref`; `cbor::raw::validate` | `roundtrip_test::invalid_validity_order_cannot_be_issued`; `duplicate_attributes_cannot_be_issued`; `device_key_must_be_public_complete_and_on_a_supported_curve`; `ambiguous_element_value_is_rejected_before_external_signing`; `subsecond_clock_input_is_normalized_only_after_order_validation`; `normalization_cannot_hide_reversed_order_or_create_an_empty_interval` |
 | ISSUE-03 | External holder signing; optional | Prepare Sig_structure; verify returned signature; emit detached DeviceSignature without key custody. | `src/response_builder.rs` | `response_external::external_holder_signs_sig_structure_and_finishes_a_detached_proof`; `external_holder_wrong_key_altered_input_and_der_signatures_are_rejected`; `preparing_rejects_algorithm_curve_mismatch_and_unsupported_algorithms` |
 | ENCODE-01 | Original signed-byte integrity; required | Encoding retains raw protected headers, disclosures and namespaces; attaching a device payload is rejected. Raw Tag 24 fields must have exact framing; embedded content and resource budgets are checked in the complete output. | `src/encoder.rs` | `response_external::encoder_preserves_original_protected_header_bytes`; `encoder_never_substitutes_decoded_attributes_for_signed_item_bytes`; `encoder_cannot_silently_attach_a_device_signature_payload`; `official_annex_d_signed_items_and_payloads_survive_encoding_exactly`; `encoder_checks_raw_tag24_framing_and_embedded_contents_after_model_mutation`; `encoder_applies_budgets_to_the_complete_envelope` |
+
+## Device-retrieval reader
+
+The request/error APIs are available without features. Session operations require
+`reader-session`; native extended curves additionally require `reader-crypto`.
+These features select implementation cost, not the standard's mandatory scope.
+
+| ID | ISO 2021 contract | Implementation | Regression contract |
+| --- | --- | --- | --- |
+| READER-01 | §8.3.2.1.2.1 and §7.2.5: immutable Tag 24 ItemsRequest, typed retention intent, nonempty requested fields, requestInfo preservation, bounded DeviceRequest encoding and cumulative age limit. | `src/reader.rs`: `ItemsRequest`, `encode_device_request`; `ReaderSession` | `reader_requests::unsigned_requests_retain_exact_items_and_unknown_request_info`; `request_schema_rejects_ambiguous_or_empty_requested_elements`; `age_attestation_limit_applies_to_the_complete_request`; `session_reader::age_limit_spans_requests_and_failed_send_does_not_consume_budget` |
+| READER-02 | §9.1.4: optional reader authentication binds exact request/transcript bytes, protected algorithm and unprotected x5chain; external completion verifies the signature. | `prepare_reader_authentication`; `PreparedReaderAuthentication::finish` | `reader_requests::independently_generated_reader_authentication_vector`; `reader_signature_binds_exact_request_transcript_and_certificate`; `external_completion_rejects_wrong_key_input_der_and_algorithm` |
+| READER-03 | §§8.3.2.1.2.2–3: status-only, document and element errors retain raw untrusted fields; no partial credential admission. | `ResponseEnvelope`; `session::reader::ReaderResponse` | `reader_requests::status_only_and_document_errors_are_available_without_claims`; `mixed_document_errors_never_relax_atomic_presentation_verification`; `response_errors_reject_invalid_shapes_duplicates_and_trailing_bytes`; `session_reader::status_and_mixed_error_responses_never_contain_authenticated_claims` |
+| READER-04 | §§8.2.1.1, 9.1.1, 9.1.5: original engagement/handover/key bytes; separate agreement-key roles; matching curves, checked points and fixed-width nonzero ECDH results. Reader EC2 is uncompressed; device EC2 permits compressed encoding. | `ReaderSession::new`; `AgreementPublicKey`; external `ReaderKeyAgreement` | `session_reader::agreement_roles_optional_parameters_and_invalid_points_are_checked_once`; `handover_roles_and_bounded_transcript_are_enforced`; `composed_transcript_and_encrypted_request_share_outer_resource_limits`; `session_agreement_curves::all_table22_agreement_curves_match_independent_full_session_vectors` |
+| READER-05 | §§9.1.3.4–5: HMAC-256/256 uses the issuer-authenticated SDevice key and this session's reader private key; detached payload, original protected bytes and the same disclosure/authorization checks as signatures. | `verify_device_mac`; shared `verify_parsed_presentation` | `session_reader::independent_full_session_mac_signature_and_directional_keys`; `authentication_failures_close_and_release_without_partial_claims` |
+| READER-06 | §9.1.1: HKDF contexts, AES-256-GCM, distinct directional counters from 1, ordered request/response transitions, replay rejection and terminal key release. | `ReaderSession`; `SessionStatus` | `session_reader::independent_full_session_mac_signature_and_directional_keys`; `replay_order_and_wrong_session_fail_closed`; `terminal_data_is_authenticated_before_external_key_destruction`; `parallel_sessions_keep_counters_and_authentication_independent`; unit `directional_counter_exhaustion_terminates_without_wrap_or_reuse` |
+| READER-07 | §§9.1.2.4, 9.1.3.6, 9.1.5.2: native Brainpool/Ed448 signature combinations across COSE, SPKI, borrowed and owned verification. | `src/cose/openssl_backend.rs`; existing `VerificationKey` | `reader_crypto::independent_extended_curve_presentations_follow_the_compiled_capability`; `extended_curve_presentations_reject_changed_transcripts_signatures_and_claims`; `a_failed_extended_document_rejects_the_entire_response`; COSE units `independent_wycheproof_cases_cover_owned_borrowed_and_spki_paths`, `rfc8032_ed448_blank_and_one_octet_verify_without_prehashing`, `compressed_brainpool_keys_verify_and_reject_changed_parity_and_invalid_x`, `ed448_rejects_identity_forgery_and_noncanonical_points` |
+
+The frozen reader-authentication and session fixtures are generated independently
+using Python CBOR framing, Python cryptography and standard-library HKDF/HMAC.
+The [native cryptography corpus](../tests/vectors/reader_crypto/README.md)
+records selected Wycheproof cases, RFC vectors, independent full presentations,
+source revisions, licenses and hashes. These fixtures support their specified
+protocol/algorithm cases; they are not the ISO/IEC TS 18013-6 conformance suite.
 
 ## Borrowed API and direct encoding regressions
 
@@ -130,6 +160,12 @@ bytes must agree with their decoded fields. Unsupported critical labels reject.
 ISO 2021's unprotected x5chain accepts a single certificate byte string or a
 nonempty certificate array, including a one-element array. Every element must be
 a nonempty byte string. Applications validate DER, paths and issuer identity.
+
+Signature-purpose COSE keys retain the existing strict `alg`/`key_ops`/`base_iv`
+profile. This is narrower than ISO §9.1.5.2's recommendation to ignore optional
+key parameters. EReader/EDevice parsing ignores optional parameters; MSO SDevice
+keys still pass common metadata syntax/profile checks before their MAC-specific
+role validation. Neither path accepts private key material in a public key.
 
 ## Time
 
@@ -202,6 +238,8 @@ Certificate revocation and credential status are separate checks.
 | Complete authenticated status extension | Supported mechanism, list signature, authorized signer, URI, time, index and state |
 | Transcript bound to supplied context | Authentic request context, encryption-key selection and nonce consumption |
 | Immutable signing input and verified completion | Signing-key authorization, issuer policy and status publication |
+| ReaderSession with validated agreement peers and ordered counters | Fresh private-key generation/destruction, actual ECDH, NFC/BLE/QR acquisition, retrieval-option processing, transport errors/closure and timers |
+| Reader requests and untrusted protocol errors | Retention intent, requested-claim policy, reader identity/certificate policy and error presentation; no claims from error-bearing responses |
 
 Runtime validation records identify exact revisions, feature sets, targets,
 fuzz campaigns, advisory snapshots and measurements. The independent vectors

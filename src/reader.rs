@@ -151,7 +151,7 @@ pub struct PreparedReaderAuthentication<'a> {
 /// Prepare §9.1.4.4 without importing a private key.
 ///
 /// The host selects and authorizes the reader identity and certificate chain.
-/// This function checks DER and the leaf's signature algorithm/key binding;
+/// This function checks DER and binds the COSE algorithm to the leaf's SPKI;
 /// it does not apply the Document Signer certificate profile to reader keys.
 pub fn prepare_reader_authentication<'a>(
     items: ItemsRequest<'a>,
