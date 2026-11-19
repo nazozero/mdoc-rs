@@ -145,6 +145,7 @@ fn ed448_rejects_non_identity_torsion_public_key() {
         .param(-2, ciborium::Value::Bytes(order_two.to_vec()))
         .build();
     assert!(VerificationKey::from_cose(&key, algorithms::EDDSA).is_err());
+    #[cfg(feature = "issue")]
     assert!(crate::cose::key::validate_device_public_key(&key).is_err());
 }
 
