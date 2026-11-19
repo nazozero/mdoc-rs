@@ -1,6 +1,6 @@
 # Reader cryptography vectors
 
-`reader-crypto` uses pure Rust `bp256`, `bp384` and `crrl`
+`reader-crypto` uses RustCrypto `bp256`, `bp384` and `ed448-goldilocks`
 for Brainpool P256r1/P384r1 and Ed448 on native and WASM targets. Brainpool
 P320r1/P512r1 remain in the reference corpus but are rejected by the core
 pending a reviewed implementation. OpenSSL is used only by independent
