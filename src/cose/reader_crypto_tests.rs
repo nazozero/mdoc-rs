@@ -133,6 +133,22 @@ fn curve_algorithm_usage_encoding_and_point_substitutions_fail() {
 }
 
 #[test]
+fn ed448_rejects_non_identity_torsion_public_key() {
+    // The order-two point (0,-1) has canonical y = p-1 and must not
+    // be admitted as a standalone MSO device key or verifier key.
+    let mut order_two = [0xff; 57];
+    order_two[0] = 0xfe;
+    order_two[28] = 0xfe;
+    order_two[56] = 0;
+    let key = coset::CoseKeyBuilder::new_okp_key()
+        .param(-1, 7.into())
+        .param(-2, ciborium::Value::Bytes(order_two.to_vec()))
+        .build();
+    assert!(VerificationKey::from_cose(&key, algorithms::EDDSA).is_err());
+    assert!(crate::cose::key::validate_device_public_key(&key).is_err());
+}
+
+#[test]
 fn ed448_rejects_identity_forgery_and_noncanonical_points() {
     let mut identity = vec![0; 57];
     identity[0] = 1;

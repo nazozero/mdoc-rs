@@ -27,13 +27,16 @@ impl ExtendedVerificationKey {
                         "noncanonical Ed448 public point".into(),
                     ));
                 }
-                ed448_goldilocks::VerifyingKey::from_bytes(
+                let key = ed448_goldilocks::VerifyingKey::from_bytes(
                     bytes
                         .try_into()
                         .expect("canonical Ed448 points have length 57"),
                 )
-                .map(Self::Ed448)
-                .map_err(|_| MdocError::Signature("invalid Ed448 public point".into()))
+                .map_err(|_| MdocError::Signature("invalid Ed448 public point".into()))?;
+                if !bool::from(key.to_edwards().is_torsion_free()) {
+                    return Err(MdocError::Signature("non-prime-order Ed448 public point".into()));
+                }
+                Ok(Self::Ed448(key))
             }
             _ => Err(MdocError::UnsupportedAlgorithm(
                 "unsupported extended signature curve".into(),
